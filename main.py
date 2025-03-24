@@ -575,7 +575,16 @@ async def create_conversation(request: Request):
         conversation_id = provided_id if provided_id else str(uuid.uuid4())
         
         # Create the conversation
-        MongoDBConversationManager.create_conversation(conversation_id)
+        title = data.get("title", "General Chat")
+        description = data.get("description", "General conversation about Portuguese language")
+        user_id = data.get("user_id", "default_user")
+        
+        MongoDBConversationManager.create_conversation(
+            conversation_id=conversation_id,
+            title=title,
+            description=description,
+            user_id=user_id
+        )
         
         return {
             "status": "success",
