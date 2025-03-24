@@ -28,7 +28,8 @@ CONVERSATION_RESPONSE=$(curl -s -X 'POST' \
   -d '{
     "title": "Test Conversation",
     "description": "A test conversation created by the test script",
-    "user_id": "default_user"
+    "user_id": "default_user",
+    "conversation_id": null
   }')
 
 echo "$CONVERSATION_RESPONSE"

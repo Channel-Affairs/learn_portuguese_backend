@@ -15,7 +15,8 @@ from models import (
     QuestionResponse, AIChatResponse, UserChatRequest, QuestionRequest,
     UserAnswer, AnswerEvaluation, UserAnswerResponse, GrammarRule, 
     GrammarRuleResponse, ConversationCreate, ConversationResponse,
-    ConversationListResponse, Message, ConversationHistoryResponse
+    ConversationListResponse, Message, ConversationHistoryResponse,
+    GetOrCreateConversation, ProcessMessage, ProcessMessageResponse
 )
 from question_generator import QuestionGenerator
 # Use MongoDB conversation manager
@@ -180,50 +181,64 @@ async def get_conversation_context(conversation_id: Optional[str]) -> List[Dict[
 # Function to detect user intent
 async def detect_user_intent(user_message: str) -> Dict[str, Any]:
     """Detect the user's intent from their message"""
-    # Detect if this is a question request
-    question_keywords = [
-        "quiz", "exercise", "question", "test", "practice",
-        "ask me", "quiz me", "test me", "give me questions", "generate questions"
+    # Use OpenAI to detect intent rather than keywords
+    intent_prompt = [
+        {"role": "system", "content": "You are an AI assistant that can detect user intent. Your task is to classify if the user is asking for practice exercises/quiz/questions to test their knowledge, or if they're having a general conversation seeking information. When the user wants a quiz or exercises to practice Portuguese, classify as 'question_generation'. For general information or conversation, classify as 'general_chat'. Respond with ONLY 'question_generation' or 'general_chat'."},
+        {"role": "user", "content": "Give me a quiz about Portuguese verbs"},
+        {"role": "assistant", "content": "question_generation"},
+        {"role": "user", "content": "How do you say 'hello' in Portuguese?"},
+        {"role": "assistant", "content": "general_chat"},
+        {"role": "user", "content": "I need practice questions for Portuguese vocabulary"},
+        {"role": "assistant", "content": "question_generation"},
+        {"role": "user", "content": "Can you tell me about Portugal's history?"},
+        {"role": "assistant", "content": "general_chat"},
+        {"role": "user", "content": user_message}
     ]
     
-    user_message_lower = user_message.lower()
+    # Get intent classification from OpenAI
+    intent_response = await create_openai_completion(messages=intent_prompt)
+    intent_text = intent_response.choices[0].message.content.strip().lower()
+    print(f"Intent detection: '{intent_text}' for message: '{user_message}'")
     
-    # Check for explicit question request
-    for keyword in question_keywords:
-        if keyword in user_message_lower:
-            # Extract topic if mentioned
-            topic = "Portuguese language"  # Default
-            topic_indicators = ["about ", "on ", "related to ", "regarding ", "for "]
-            
-            for indicator in topic_indicators:
-                if indicator in user_message_lower:
-                    # Extract the part after the indicator
-                    parts = user_message_lower.split(indicator, 1)
-                    if len(parts) > 1:
-                        # Extract up to the next punctuation or end of string
-                        topic_part = parts[1].split('.')[0].split('?')[0].split('!')[0]
-                        if topic_part:
-                            topic = topic_part
-            
-            # Detect difficulty if mentioned
-            difficulty = None
-            if "easy" in user_message_lower:
-                difficulty = DifficultyLevel.EASY
-            elif "hard" in user_message_lower or "difficult" in user_message_lower:
-                difficulty = DifficultyLevel.HARD
-            elif "medium" in user_message_lower or "intermediate" in user_message_lower:
-                difficulty = DifficultyLevel.MEDIUM
-            
-            return {
-                "intent": "question_request",
-                "topic": topic,
-                "difficulty": difficulty
-            }
+    # Determine if this is a question generation request
+    is_question_intent = intent_text == "question_generation"
     
     # Default intent is general chat
-    return {
+    intent = {
         "intent": "general_chat"
     }
+    
+    if is_question_intent:
+        # Extract topic if mentioned
+        topic = "Portuguese language"  # Default
+        topic_indicators = ["about ", "on ", "related to ", "regarding ", "for "]
+        
+        for indicator in topic_indicators:
+            if indicator in user_message:
+                # Extract the part after the indicator
+                parts = user_message.split(indicator, 1)
+                if len(parts) > 1:
+                    # Extract up to the next punctuation or end of string
+                    topic_part = parts[1].split('.')[0].split('?')[0].split('!')[0]
+                    if topic_part:
+                        topic = topic_part
+        
+        # Detect difficulty if mentioned
+        difficulty = None
+        if "easy" in user_message:
+            difficulty = DifficultyLevel.EASY
+        elif "hard" in user_message or "difficult" in user_message:
+            difficulty = DifficultyLevel.HARD
+        elif "medium" in user_message or "intermediate" in user_message:
+            difficulty = DifficultyLevel.MEDIUM
+        
+        intent = {
+            "intent": "question_request",
+            "topic": topic,
+            "difficulty": difficulty
+        }
+    
+    return intent
 
 # Function to generate AI response
 async def generate_ai_response(user_message: str, conversation_id: Optional[str] = None) -> AIChatResponse:
@@ -552,32 +567,31 @@ async def evaluate_user_answer(user_answer: UserAnswer):
         raise HTTPException(status_code=500, detail=f"Error evaluating answer: {str(e)}")
 
 # Create conversation endpoint
-@app.post("/api/conversations")
-async def create_conversation(request: Request):
+@app.post("/api/conversations", response_model=ConversationResponse)
+async def create_conversation(conversation: ConversationCreate):
     try:
-        data = await request.json()
-        
         # Get conversation_id from request if provided
-        provided_id = data.get("conversation_id")
+        provided_id = conversation.conversation_id
         
         # Check if this ID exists in our database
         if provided_id and MongoDBConversationManager.get_conversation(provided_id):
             # Conversation exists, return it
-            return {
-                "status": "success",
-                "message": "Existing conversation retrieved",
-                "conversation_id": provided_id,
-                "history": MongoDBConversationManager.get_conversation_history(provided_id)
-            }
+            return ConversationResponse(
+                conversation_id=provided_id,
+                title=MongoDBConversationManager.get_conversation(provided_id).get("title", "Untitled"),
+                description=MongoDBConversationManager.get_conversation(provided_id).get("description", ""),
+                status="success",
+                message="Existing conversation retrieved"
+            )
         
         # Either ID wasn't provided or conversation doesn't exist
         # If ID was provided, use it, otherwise generate a new one
         conversation_id = provided_id if provided_id else str(uuid.uuid4())
         
         # Create the conversation
-        title = data.get("title", "General Chat")
-        description = data.get("description", "General conversation about Portuguese language")
-        user_id = data.get("user_id", "default_user")
+        title = conversation.title if conversation.title else "General Chat"
+        description = conversation.description if conversation.description else "General conversation about Portuguese language"
+        user_id = conversation.user_id if conversation.user_id else "default_user"
         
         MongoDBConversationManager.create_conversation(
             conversation_id=conversation_id,
@@ -586,17 +600,18 @@ async def create_conversation(request: Request):
             user_id=user_id
         )
         
-        return {
-            "status": "success",
-            "message": "Conversation created successfully",
-            "conversation_id": conversation_id,
-            "history": []
-        }
+        return ConversationResponse(
+            conversation_id=conversation_id,
+            title=title,
+            description=description,
+            status="success",
+            message="Conversation created successfully"
+        )
     except Exception as e:
-        return {
-            "status": "error",
-            "message": f"Error creating conversation: {str(e)}"
-        }
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Error creating conversation: {str(e)}"
+        )
 
 # Get conversation history endpoint
 @app.get("/api/conversations/{conversation_id}", response_model=ConversationHistoryResponse)
@@ -738,6 +753,236 @@ async def list_conversations(user_id: str = "default_user"):
         return ConversationListResponse(conversations=formatted_conversations)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error listing conversations: {str(e)}")
+
+# Get or create conversation endpoint
+@app.post("/api/conversations/get-or-create", 
+          response_model=ConversationHistoryResponse, 
+          summary="Get or create conversation by ID",
+          description="Get conversation if exists or create a new one with the provided ID")
+async def get_or_create_conversation(conversation_data: GetOrCreateConversation):
+    try:
+        # Get the conversation ID from the request
+        conversation_id = conversation_data.conversation_id
+        
+        # Check if this ID exists in MongoDB
+        conversation = MongoDBConversationManager.get_conversation(conversation_id)
+        
+        if conversation:
+            # Conversation exists, return its history
+            messages = MongoDBConversationManager.get_conversation_history(conversation_id)
+            return ConversationHistoryResponse(
+                conversation_id=conversation_id,
+                title=conversation.get("title", "Untitled"),
+                description=conversation.get("description", ""),
+                messages=messages
+            )
+        else:
+            # Create a new conversation with the provided ID
+            title = conversation_data.title
+            description = conversation_data.description
+            user_id = conversation_data.user_id
+            
+            MongoDBConversationManager.create_conversation(
+                conversation_id=conversation_id,
+                title=title,
+                description=description,
+                user_id=user_id
+            )
+            
+            return ConversationHistoryResponse(
+                conversation_id=conversation_id,
+                title=title,
+                description=description,
+                messages=[]
+            )
+            
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error processing conversation: {str(e)}"
+        )
+
+# Process user message with context
+@app.post("/api/process-message", 
+          summary="Process user message with topic context", 
+          description="Process user message maintaining topic context and detecting intent for questions or general chat")
+async def process_message(message_data: ProcessMessage):
+    try:
+        # Extract data from request
+        conversation_id = message_data.conversation_id
+        user_message = message_data.message
+        topic = message_data.topic
+        
+        # Use OpenAI to detect intent rather than keywords
+        intent_prompt = [
+            {"role": "system", "content": "You are an AI assistant that can detect user intent. Your task is to classify if the user is asking for practice exercises/quiz/questions to test their knowledge, or if they're having a general conversation seeking information. When the user wants a quiz or exercises to practice Portuguese, classify as 'question_generation'. For general information or conversation, classify as 'general_chat'. Respond with ONLY 'question_generation' or 'general_chat'."},
+            {"role": "user", "content": "Give me a quiz about Portuguese verbs"},
+            {"role": "assistant", "content": "question_generation"},
+            {"role": "user", "content": "How do you say 'hello' in Portuguese?"},
+            {"role": "assistant", "content": "general_chat"},
+            {"role": "user", "content": "I need practice questions for Portuguese vocabulary"},
+            {"role": "assistant", "content": "question_generation"},
+            {"role": "user", "content": "Can you tell me about Portugal's history?"},
+            {"role": "assistant", "content": "general_chat"},
+            {"role": "user", "content": user_message}
+        ]
+        
+        # Get intent classification from OpenAI
+        intent_response = await create_openai_completion(messages=intent_prompt)
+        intent_text = intent_response.choices[0].message.content.strip().lower()
+        print(f"Intent detection: '{intent_text}' for message: '{user_message}'")
+        
+        # Determine if this is a question generation request
+        is_question_intent = intent_text == "question_generation"
+        
+        if is_question_intent:
+            # Generate questions
+            difficulty = message_data.difficulty
+            num_questions = message_data.num_questions
+            
+            try:
+                # Debug prints
+                print(f"Generating questions with topic={topic}, num_questions={num_questions}, difficulty={difficulty}")
+                
+                # Make sure we convert difficulty to string for the response
+                difficulty_str = difficulty.value if hasattr(difficulty, 'value') else difficulty
+                
+                # Generate only fill in the blank questions for simplicity
+                print("Generating Fill In The Blanks questions only")
+                questions = question_generator.generate_questions(
+                    topic=topic,
+                    num_questions=num_questions,
+                    difficulty=difficulty,
+                    question_types=[QuestionTypes.FILL_IN_THE_BLANKS]
+                )
+                
+                print(f"Generated {len(questions)} questions")
+                
+                # Store the message and response in the conversation history
+                MongoDBConversationManager.add_message(
+                    conversation_id=conversation_id,
+                    message={
+                        "sender": MessageSenders.USER,
+                        "content": user_message,
+                        "timestamp": datetime.now().isoformat()
+                    }
+                )
+                
+                # Add AI message with questions to conversation history
+                response_content = f"Here are some questions about {topic}:"
+                MongoDBConversationManager.add_message(
+                    conversation_id=conversation_id,
+                    message={
+                        "sender": MessageSenders.AI,
+                        "content": response_content,
+                        "timestamp": datetime.now().isoformat(),
+                        "type": ResponseType.QUESTION,
+                        "payload": {
+                            "questions": [q.dict() for q in questions]
+                        }
+                    }
+                )
+                
+                # Create lists for the response
+                all_questions = []
+                for q in questions:
+                    try:
+                        all_questions.append(q.dict())
+                    except Exception as e:
+                        print(f"Error converting question to dict: {str(e)}")
+                
+                # Return the questions in a simplified JSON format
+                result = {
+                    "type": "question",
+                    "intent": "question_generation",
+                    "message": response_content,
+                    "topic": topic,
+                    "difficulty": difficulty_str,
+                    "questions": all_questions
+                }
+                
+                print(f"Returning result with {len(all_questions)} questions")
+                return result
+                
+            except Exception as e:
+                import traceback
+                error_details = traceback.format_exc()
+                print(f"Error in question generation: {str(e)}\n{error_details}")
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Error generating questions: {str(e)}"
+                )
+        else:
+            # General conversation logic - print more debug information
+            print(f"Processing general chat for topic: {topic}")
+            
+            # Create context with topic to maintain the conversation focus
+            context_messages = [
+                {"role": "system", "content": f"You are a Portuguese language assistant. The user is studying about '{topic}'. Keep your responses focused on this topic when relevant."}
+            ]
+            
+            # Get conversation history to maintain context
+            history = MongoDBConversationManager.get_conversation_history(conversation_id)
+            print(f"Got history with {len(history)} messages")
+            
+            for msg in history[-5:]:  # Use last 5 messages for context
+                if msg.get("sender") == MessageSenders.USER:
+                    context_messages.append({"role": "user", "content": msg.get("content", "")})
+                else:
+                    context_messages.append({"role": "assistant", "content": msg.get("content", "")})
+            
+            # Add current message
+            context_messages.append({"role": "user", "content": user_message})
+            print(f"Created context with {len(context_messages)} messages")
+            
+            # Generate AI response
+            print("Calling OpenAI API...")
+            response = await create_openai_completion(messages=context_messages)
+            ai_message = response.choices[0].message.content
+            print(f"Got response: {ai_message[:50]}...")
+            
+            # Store the user message in conversation history
+            MongoDBConversationManager.add_message(
+                conversation_id=conversation_id,
+                message={
+                    "sender": MessageSenders.USER,
+                    "content": user_message,
+                    "timestamp": datetime.now().isoformat()
+                }
+            )
+            
+            # Store the AI response in conversation history
+            print("Adding AI message to conversation history")
+            MongoDBConversationManager.add_message(
+                conversation_id=conversation_id,
+                message={
+                    "sender": MessageSenders.AI,
+                    "content": ai_message,
+                    "timestamp": datetime.now().isoformat(),
+                    "type": ResponseType.TEXT,
+                    "payload": {"text": ai_message}
+                }
+            )
+            
+            # Return the response with debugging info
+            print("Returning response to client")
+            result = {
+                "type": "text",
+                "intent": "general_chat",
+                "message": ai_message,
+                "topic": topic
+            }
+            print(f"Result: {result}")
+            return result
+            
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        print(f"Error processing message: {str(e)}\n{error_details}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error processing message: {str(e)}"
+        )
 
 # Run with: uvicorn main:app --reload
 if __name__ == "__main__":

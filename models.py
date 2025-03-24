@@ -104,16 +104,20 @@ class GrammarRuleResponse(BaseModel):
 
 # New models for conversations
 class ConversationCreate(BaseModel):
-    title: str
-    description: str
+    title: Optional[str] = "General Chat"
+    description: Optional[str] = "General conversation about Portuguese language"
     user_id: Optional[str] = "default_user"
+    conversation_id: Optional[str] = None
 
 class ConversationResponse(BaseModel):
     conversation_id: str
     title: str
     description: str
-    created_at: str
-    updated_at: str
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    status: Optional[str] = None
+    message: Optional[str] = None
+    history: Optional[List[Dict[str, Any]]] = None
 
 class ConversationListResponse(BaseModel):
     conversations: List[ConversationResponse]
@@ -130,4 +134,26 @@ class ConversationHistoryResponse(BaseModel):
     conversation_id: str
     title: str
     description: str
-    messages: List[Message] 
+    messages: List[Message]
+
+# New models for conversation context
+class GetOrCreateConversation(BaseModel):
+    conversation_id: str
+    title: Optional[str] = "New Conversation"
+    description: Optional[str] = "Conversation about Portuguese"
+    user_id: Optional[str] = "default_user"
+
+class ProcessMessage(BaseModel):
+    conversation_id: str
+    message: str
+    topic: Optional[str] = "Portuguese language"
+    difficulty: Optional[DifficultyLevel] = DifficultyLevel.MEDIUM
+    num_questions: Optional[int] = Field(default=2, ge=1, le=5)
+
+class ProcessMessageResponse(BaseModel):
+    type: Literal["text", "question"]
+    intent: str
+    message: str
+    topic: Optional[str] = None
+    difficulty: Optional[str] = None
+    questions: Optional[Dict[str, List[Dict[str, Any]]]] = None 
