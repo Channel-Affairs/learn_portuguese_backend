@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends, Query, Header
+from fastapi import FastAPI, HTTPException, Depends, Query, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Dict, Any, List, Optional
 import os
@@ -552,25 +552,42 @@ async def evaluate_user_answer(user_answer: UserAnswer):
         raise HTTPException(status_code=500, detail=f"Error evaluating answer: {str(e)}")
 
 # Create conversation endpoint
-@app.post("/api/conversations", response_model=Dict[str, str])
-async def create_conversation(conversation: ConversationCreate):
-    """Create a new conversation with specified ID, title, and description"""
+@app.post("/api/conversations")
+async def create_conversation(request: Request):
     try:
-        # Generate a unique ID for the conversation if not provided in the request body
-        conversation_id = str(uuid.uuid4())
+        data = await request.json()
         
-        # Create conversation in MongoDB
-        MongoDBConversationManager.create_conversation(
-            conversation_id=conversation_id,
-            title=conversation.title,
-            description=conversation.description,
-            user_id=conversation.user_id
-        )
+        # Get conversation_id from request if provided
+        provided_id = data.get("conversation_id")
         
-        # Return the conversation ID
-        return {"conversation_id": conversation_id}
+        # Check if this ID exists in our database
+        if provided_id and MongoDBConversationManager.get_conversation(provided_id):
+            # Conversation exists, return it
+            return {
+                "status": "success",
+                "message": "Existing conversation retrieved",
+                "conversation_id": provided_id,
+                "history": MongoDBConversationManager.get_conversation_history(provided_id)
+            }
+        
+        # Either ID wasn't provided or conversation doesn't exist
+        # If ID was provided, use it, otherwise generate a new one
+        conversation_id = provided_id if provided_id else str(uuid.uuid4())
+        
+        # Create the conversation
+        MongoDBConversationManager.create_conversation(conversation_id)
+        
+        return {
+            "status": "success",
+            "message": "Conversation created successfully",
+            "conversation_id": conversation_id,
+            "history": []
+        }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error creating conversation: {str(e)}")
+        return {
+            "status": "error",
+            "message": f"Error creating conversation: {str(e)}"
+        }
 
 # Get conversation history endpoint
 @app.get("/api/conversations/{conversation_id}", response_model=ConversationHistoryResponse)
