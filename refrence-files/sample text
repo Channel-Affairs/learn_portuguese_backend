@@ -1,0 +1,125 @@
+import { Icons } from '@/components/ui/icons';
+
+export interface NavItem {
+  title: string;
+  href: string;
+  disabled?: boolean;
+  external?: boolean;
+  icon?: keyof typeof Icons;
+  label?: string;
+  description?: string;
+}
+
+export interface NavItemWithChildren extends NavItem {
+  items: NavItemWithChildren[];
+}
+
+export interface NavItemWithOptionalChildren extends NavItem {
+  items?: NavItemWithChildren[];
+}
+
+export interface FooterItem {
+  title: string;
+  items: {
+    title: string;
+    href: string;
+    external?: boolean;
+  }[];
+}
+
+export type MainNavItem = NavItemWithOptionalChildren;
+
+export type SidebarNavItem = NavItemWithChildren;
+
+// ------------------------------ Chat Types ------------------------------------------
+
+// ==============================
+// ENUMS & TYPES
+// ==============================
+
+// Response types from AI
+export type ResponseType =
+  | 'text' // Simple text response
+  | 'question' // Any type of question
+  | 'correction' // Correcting user input
+  | 'hint' // Giving a hint
+  | 'explanation' // Explaining a concept
+  | 'feedback'; // General feedback on user performance
+
+// Difficulty levels for questions
+export type DifficultyLevel = 'easy' | 'medium' | 'hard';
+
+// Question types
+export enum QuestionTypes {
+  FillInTheBlanks = 'FillInTheBlanks',
+  MultipleChoice = 'MultipleChoice'
+}
+
+// Message sender types
+export enum MessageSenders {
+  User = 'User',
+  AI = 'AI'
+}
+
+// ==============================
+// QUESTION INTERFACES
+// ==============================
+
+// Base interface for all question types
+interface BaseQuestion {
+  readonly id: string; // Unique identifier
+  readonly type: QuestionTypes;
+  questionText: string; // Question text
+  questionDescription: string; // Additional details about the question
+  correct_answers: ReadonlyArray<string>; // Correct answer(s)
+  difficulty: DifficultyLevel; // Question difficulty level
+  hint?: string | null; // Optional hint
+}
+
+// Multiple-choice question interface
+export interface MultipleChoiceQuestion extends BaseQuestion {
+  readonly type: QuestionTypes.MultipleChoice;
+  options: ReadonlyArray<string>; // Options for multiple choice
+}
+
+// Fill-in-the-blank question interface
+export interface FillInTheBlankQuestion extends BaseQuestion {
+  readonly type: QuestionTypes.FillInTheBlanks;
+  questionSentence: string; // Sentence containing blanks
+  blankSeparator: string; // Separator for blanks
+  numberOfBlanks: number; // Number of blanks
+}
+
+// ==============================
+// AI RESPONSE INTERFACES
+// ==============================
+
+// AI response structure
+export interface TextResponse {
+  text: string; // Simple text content
+}
+
+export type QuestionType = FillInTheBlankQuestion | MultipleChoiceQuestion;
+// AI question response structure
+export interface QuestionResponse {
+  questions: ReadonlyArray<QuestionType>;
+}
+
+// AI chat response interface
+export interface AIChatResponse {
+  readonly id: number; // Unique response ID
+  readonly sender: MessageSenders.AI;
+  type: ResponseType; // Type of response
+  content: string; // Main content (e.g., "Fill in the blank")
+  payload: TextResponse | QuestionResponse;
+}
+
+// User chat response interface
+export interface UserChatResponse {
+  readonly id: number;
+  readonly sender: MessageSenders.User;
+  content: string; // User's input text
+}
+
+// Unified chat response type
+export type ChatResponse = Readonly<AIChatResponse | UserChatResponse>;
