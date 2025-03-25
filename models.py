@@ -87,21 +87,6 @@ class UserAnswerResponse(BaseModel):
     evaluation: AnswerEvaluation
     next_question: Optional[Union[MultipleChoiceQuestion, FillInTheBlankQuestion]] = None
 
-# New models for grammar rules
-class GrammarSubtopic(BaseModel):
-    id: str
-    title: str
-    description: str
-
-class GrammarRule(BaseModel):
-    id: str
-    title: str
-    description: str
-    subtopics: List[GrammarSubtopic]
-
-class GrammarRuleResponse(BaseModel):
-    rules: List[GrammarRule]
-
 # New models for conversations
 class ConversationCreate(BaseModel):
     title: Optional[str] = "General Chat"

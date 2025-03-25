@@ -13,14 +13,14 @@ from models import (
     MessageSenders, ResponseType, QuestionTypes, DifficultyLevel,
     TextResponse, BaseQuestion, MultipleChoiceQuestion, FillInTheBlankQuestion,
     QuestionResponse, AIChatResponse, UserChatRequest, QuestionRequest,
-    UserAnswer, AnswerEvaluation, UserAnswerResponse, GrammarRule, 
-    GrammarRuleResponse, ConversationCreate, ConversationResponse,
+    UserAnswer, AnswerEvaluation, UserAnswerResponse, 
+    ConversationCreate, ConversationResponse,
     ConversationListResponse, Message, ConversationHistoryResponse,
     GetOrCreateConversation, ProcessMessage, ProcessMessageResponse
 )
 from question_generator import QuestionGenerator
 # Use MongoDB conversation manager
-from database import MongoDBConversationManager, GrammarRulesManager, MongoJSONEncoder, initialize_db
+from database import MongoDBConversationManager, MongoJSONEncoder, initialize_db
 
 # Load environment variables
 load_dotenv()
@@ -704,30 +704,6 @@ async def test_openai_connection():
             "openai_module_version": openai.__version__ if 'openai' in globals() else "unknown"
         }
 
-# Get grammar rules endpoint
-@app.get("/api/grammar-rules", response_model=GrammarRuleResponse)
-async def get_grammar_rules():
-    """Get all grammar rules"""
-    try:
-        grammar_rules = GrammarRulesManager.get_all_grammar_rules()
-        return GrammarRuleResponse(rules=grammar_rules)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error retrieving grammar rules: {str(e)}")
-
-# Get specific grammar rule
-@app.get("/api/grammar-rules/{rule_id}")
-async def get_grammar_rule(rule_id: str):
-    """Get a specific grammar rule by ID"""
-    try:
-        rule = GrammarRulesManager.get_grammar_rule(rule_id)
-        if not rule:
-            raise HTTPException(status_code=404, detail=f"Grammar rule with ID {rule_id} not found")
-        return rule
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error retrieving grammar rule: {str(e)}")
-
 # List user's conversations
 @app.get("/api/conversations", response_model=ConversationListResponse)
 async def list_conversations(user_id: str = "default_user"):
@@ -815,15 +791,19 @@ async def process_message(message_data: ProcessMessage):
         
         # Use OpenAI to detect intent rather than keywords
         intent_prompt = [
-            {"role": "system", "content": "You are an AI assistant that can detect user intent. Your task is to classify if the user is asking for practice exercises/quiz/questions to test their knowledge, or if they're having a general conversation seeking information. When the user wants a quiz or exercises to practice Portuguese, classify as 'question_generation'. For general information or conversation, classify as 'general_chat'. Respond with ONLY 'question_generation' or 'general_chat'."},
+            {"role": "system", "content": "You are an AI assistant that can detect user intent. Your task is to classify if the user is asking for practice exercises/quiz/questions to test their knowledge, or if they're having a general conversation seeking information. When the user wants a quiz or exercises to practice Portuguese, classify as 'question_generation'. For general information or conversation, including questions about vocabulary, grammar rules, common phrases, or language information, classify as 'general_chat'. Respond with ONLY 'question_generation' or 'general_chat'."},
             {"role": "user", "content": "Give me a quiz about Portuguese verbs"},
             {"role": "assistant", "content": "question_generation"},
             {"role": "user", "content": "How do you say 'hello' in Portuguese?"},
             {"role": "assistant", "content": "general_chat"},
+            {"role": "user", "content": "Can you explain the most common Portuguese verbs?"},
+            {"role": "assistant", "content": "general_chat"},
             {"role": "user", "content": "I need practice questions for Portuguese vocabulary"},
             {"role": "assistant", "content": "question_generation"},
-            {"role": "user", "content": "Can you tell me about Portugal's history?"},
+            {"role": "user", "content": "What are the most used nouns in Portuguese?"},
             {"role": "assistant", "content": "general_chat"},
+            {"role": "user", "content": "Test my knowledge of Portuguese grammar"},
+            {"role": "assistant", "content": "question_generation"},
             {"role": "user", "content": user_message}
         ]
         
@@ -841,8 +821,30 @@ async def process_message(message_data: ProcessMessage):
             num_questions = message_data.num_questions
             
             try:
+                # Extract topic from user message if they're asking for specific questions
+                question_topic = topic  # Default to the current topic
+                
+                # Try to extract a more specific topic from the user message
+                topic_extraction_prompt = [
+                    {"role": "system", "content": "Extract the specific topic the user wants questions about from their message. Return ONLY the topic, no extra text."},
+                    {"role": "user", "content": "Give me questions about Portuguese verb conjugation"},
+                    {"role": "assistant", "content": "Portuguese verb conjugation"},
+                    {"role": "user", "content": "I want to practice Portuguese greetings"},
+                    {"role": "assistant", "content": "Portuguese greetings"},
+                    {"role": "user", "content": user_message}
+                ]
+                
+                # Get the specific topic from the user message
+                topic_response = await create_openai_completion(messages=topic_extraction_prompt)
+                extracted_topic = topic_response.choices[0].message.content.strip()
+                
+                # Use the extracted topic if it seems valid
+                if extracted_topic and len(extracted_topic) > 3 and extracted_topic.lower() != "portuguese":
+                    question_topic = extracted_topic
+                    print(f"Extracted specific topic: '{question_topic}' from user message")
+                
                 # Debug prints
-                print(f"Generating questions with topic={topic}, num_questions={num_questions}, difficulty={difficulty}")
+                print(f"Generating questions with topic={question_topic}, num_questions={num_questions}, difficulty={difficulty}")
                 
                 # Make sure we convert difficulty to string for the response
                 difficulty_str = difficulty.value if hasattr(difficulty, 'value') else difficulty
@@ -850,7 +852,7 @@ async def process_message(message_data: ProcessMessage):
                 # Generate only fill in the blank questions for simplicity
                 print("Generating Fill In The Blanks questions only")
                 questions = question_generator.generate_questions(
-                    topic=topic,
+                    topic=question_topic,
                     num_questions=num_questions,
                     difficulty=difficulty,
                     question_types=[QuestionTypes.FILL_IN_THE_BLANKS]
@@ -869,7 +871,7 @@ async def process_message(message_data: ProcessMessage):
                 )
                 
                 # Add AI message with questions to conversation history
-                response_content = f"Here are some questions about {topic}:"
+                response_content = f"Here are some questions about {question_topic}:"
                 MongoDBConversationManager.add_message(
                     conversation_id=conversation_id,
                     message={
@@ -896,7 +898,7 @@ async def process_message(message_data: ProcessMessage):
                     "type": "question",
                     "intent": "question_generation",
                     "message": response_content,
-                    "topic": topic,
+                    "topic": question_topic,
                     "difficulty": difficulty_str,
                     "questions": all_questions
                 }

@@ -30,8 +30,8 @@ try:
     # Test the connection by accessing server info
     server_info = client.server_info()
     print(f"Successfully connected to MongoDB. Server version: {server_info.get('version', 'unknown')}")
-    db = client["portagees_db"]
-    print(f"Using database: portagees_db")
+    db = client["test"]
+    print(f"Using database: test")
 except Exception as e:
     print(f"Error connecting to MongoDB: {str(e)}")
     # Provide a fallback in-memory implementation for testing
@@ -148,7 +148,6 @@ except Exception as e:
 # Collections
 conversations_collection = db["conversations"]
 messages_collection = db["messages"]
-grammar_rules_collection = db["grammar_rules"]
 users_collection = db["users"]
 
 # Ensure indexes for performance
@@ -165,59 +164,10 @@ def ensure_hardcoded_user_exists():
             "created_at": datetime.now()
         })
 
-# Basic grammar rules structure
-def ensure_grammar_rules_exist():
-    """Ensure some basic grammar rules exist in the database"""
-    if grammar_rules_collection.count_documents({}) == 0:
-        grammar_rules = [
-            {
-                "id": "pronouns",
-                "title": "Portuguese Pronouns",
-                "description": "Personal pronouns in Portuguese",
-                "subtopics": [
-                    {
-                        "id": "subject_pronouns",
-                        "title": "Subject Pronouns",
-                        "description": "Pronouns used as the subject of a sentence (eu, tu, ele/ela, etc.)"
-                    },
-                    {
-                        "id": "object_pronouns",
-                        "title": "Object Pronouns",
-                        "description": "Pronouns used as the object of a verb (me, te, o/a, etc.)"
-                    }
-                ]
-            },
-            {
-                "id": "verb_tenses",
-                "title": "Portuguese Verb Tenses",
-                "description": "Different verb tenses in Portuguese",
-                "subtopics": [
-                    {
-                        "id": "present_tense",
-                        "title": "Present Tense",
-                        "description": "How to conjugate verbs in the present tense"
-                    },
-                    {
-                        "id": "past_tense",
-                        "title": "Past Tense",
-                        "description": "How to conjugate verbs in the past tense"
-                    },
-                    {
-                        "id": "future_tense",
-                        "title": "Future Tense",
-                        "description": "How to conjugate verbs in the future tense"
-                    }
-                ]
-            }
-        ]
-        
-        grammar_rules_collection.insert_many(grammar_rules)
-
 # Initialize database with basic data
 def initialize_db():
     """Initialize the database with required data"""
     ensure_hardcoded_user_exists()
-    ensure_grammar_rules_exist()
 
 # Conversation operations
 class MongoDBConversationManager:
@@ -392,20 +342,6 @@ class MongoDBConversationManager:
                 {"conversation_id": conversation_id},
                 {"$set": {"state.difficulty_level": new_difficulty}}
             )
-
-# Grammar rules operations
-class GrammarRulesManager:
-    @staticmethod
-    def get_all_grammar_rules():
-        """Get all grammar rules for display in the tree view"""
-        rules = list(grammar_rules_collection.find({}, {"_id": 0}))
-        return rules
-    
-    @staticmethod
-    def get_grammar_rule(rule_id: str):
-        """Get a specific grammar rule by ID"""
-        rule = grammar_rules_collection.find_one({"id": rule_id}, {"_id": 0})
-        return rule
 
 # Initialize the database on module import
 initialize_db()
