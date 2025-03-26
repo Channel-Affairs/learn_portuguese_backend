@@ -18,8 +18,9 @@ CONVERSATION_ID=$(echo $CONVERSATION_RESPONSE | grep -o '"conversation_id":"[^"]
 echo "Conversation ID: $CONVERSATION_ID"
 echo
 
-# Test the process-message endpoint with a general chat message
-echo "Testing process-message with a general chat message..."
+# Test 1: General chat message
+echo "TEST 1: General chat message about Portuguese for tourists"
+echo "--------------------------------------------------------"
 curl -s -X 'POST' \
   "$API_URL/api/process-message" \
   -H 'accept: application/json' \
@@ -31,8 +32,9 @@ curl -s -X 'POST' \
   }" | jq
 echo
 
-# Test the process-message endpoint with a question generation message
-echo "Testing process-message with a question generation message..."
+# Test 2: Default fill-in-the-blank questions
+echo "TEST 2: Default fill-in-the-blank questions (not specifying question type)"
+echo "-----------------------------------------------------------------------"
 curl -s -X 'POST' \
   "$API_URL/api/process-message" \
   -H 'accept: application/json' \
@@ -41,8 +43,53 @@ curl -s -X 'POST' \
     \"conversation_id\": \"$CONVERSATION_ID\",
     \"message\": \"Give me some questions to practice Portuguese greetings\",
     \"topic\": \"Portuguese greetings\",
-    \"num_questions\": 2
-  }" | jq
+    \"num_questions\": 3
+  }" | jq '.questions | length' | xargs echo "Number of questions received:"
 echo
 
-echo "Tests completed!" 
+# Test 3: Explicitly requesting multiple choice questions with specific topic
+echo "TEST 3: Explicitly requesting multiple choice questions about days of the week"
+echo "----------------------------------------------------------------------------"
+curl -s -X 'POST' \
+  "$API_URL/api/process-message" \
+  -H 'accept: application/json' \
+  -H 'Content-Type: application/json' \
+  -d "{
+    \"conversation_id\": \"$CONVERSATION_ID\",
+    \"message\": \"I need multiple choice questions about days of the week in Portuguese\",
+    \"topic\": \"Portuguese calendar terms\",
+    \"num_questions\": 2
+  }" | jq '.questions | map(.type) | unique' | xargs echo "Question types received:"
+echo
+
+# Test 4: Explicitly requesting fill-in-the-blank with specific number
+echo "TEST 4: Explicitly requesting 4 fill-in-the-blank questions about verbs"
+echo "----------------------------------------------------------------------"
+curl -s -X 'POST' \
+  "$API_URL/api/process-message" \
+  -H 'accept: application/json' \
+  -H 'Content-Type: application/json' \
+  -d "{
+    \"conversation_id\": \"$CONVERSATION_ID\",
+    \"message\": \"Give me 4 fill in the blank questions about Portuguese verb conjugation\",
+    \"topic\": \"Portuguese verbs\",
+    \"num_questions\": 4
+  }" | jq '.questions | length' | xargs echo "Number of questions received:"
+echo
+
+# Test 5: Test if generated questions are unique
+echo "TEST 5: Testing if generated questions are unique"
+echo "------------------------------------------------"
+curl -s -X 'POST' \
+  "$API_URL/api/process-message" \
+  -H 'accept: application/json' \
+  -H 'Content-Type: application/json' \
+  -d "{
+    \"conversation_id\": \"$CONVERSATION_ID\",
+    \"message\": \"Test me with fill in the blank questions about Portuguese prepositions\",
+    \"topic\": \"Portuguese prepositions\",
+    \"num_questions\": 3
+  }" | jq '.questions | map(.questionSentence) | unique | length' | xargs echo "Number of unique question sentences:"
+echo
+
+echo "All tests completed!" 

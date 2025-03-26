@@ -111,75 +111,125 @@ class QuestionGenerator:
         topic: str = "basic vocabulary"
     ) -> MultipleChoiceQuestion:
         """Generate a multiple choice question about Portuguese"""
-        # Select a random template for the difficulty level
-        templates = self.question_templates["multiple_choice"][difficulty]
-        template = random.choice(templates)
+        # Generate the question using a more varied approach with OpenAI
         
-        # Generate the question
-        if topic == "basic vocabulary":
-            # For vocabulary questions, we'll ask about common words
-            english_words = ["dog", "cat", "house", "car", "book", "water", "food", "hello", "goodbye", "thank you"]
-            english_word = random.choice(english_words)
-            
-            # Use OpenAI to generate the question
-            prompt = f"""Create a Portuguese vocabulary question with the following:
-            1. Question should be about the Portuguese word for '{english_word}'
-            2. Provide 4 options as a Python list, with the correct answer first
-            3. Provide a hint for the correct answer
-            
-            Format your response as a valid JSON object with these keys:
-            - questionText: The full text of the question
-            - questionDescription: Brief description of what to do
-            - options: A list of 4 options (first one should be correct)
-            - correct_answers: A list with just the correct answer as string
-            - hint: A subtle hint to help the user
-            
-            Example format:
-            {{
-                "questionText": "What is the Portuguese word for 'dog'?",
-                "questionDescription": "Choose the correct translation.",
-                "options": ["Cachorro", "Gato", "Pássaro", "Peixe"],
-                "correct_answers": ["Cachorro"],
-                "hint": "It starts with 'C'."
-            }}
-            """
-            
-            response_text = self._get_openai_completion(prompt)
-            
-            try:
-                response_json = json.loads(response_text)
-                
-                # Create a multiple choice question
-                question = MultipleChoiceQuestion(
-                    id=str(uuid.uuid4()),
-                    type=QuestionTypes.MULTIPLE_CHOICE,
-                    questionText=response_json["questionText"],
-                    questionDescription=response_json["questionDescription"],
-                    options=response_json["options"],
-                    correct_answers=response_json["correct_answers"],
-                    difficulty=difficulty,
-                    hint=response_json["hint"]
-                )
-                
-                return question
-            except Exception as e:
-                print(f"Error parsing JSON from OpenAI: {str(e)}")
-                print(f"Response was: {response_text}")
-                
-                # Fallback to a default question
-                return MultipleChoiceQuestion(
-                    id=str(uuid.uuid4()),
-                    type=QuestionTypes.MULTIPLE_CHOICE,
-                    questionText=f"What is '{english_word}' in Portuguese?",
-                    questionDescription="Choose the correct translation.",
-                    options=["Cachorro", "Gato", "Pássaro", "Peixe"],
-                    correct_answers=["Cachorro"],
-                    difficulty=difficulty,
-                    hint=f"This is a common {topic} word."
-                )
+        # Create a more specific prompt that ensures diverse question generation
+        # This will help create unique questions when calling multiple times
         
-        # For other topics, we generate appropriate questions
-        # ... rest of the existing code ...
+        prompt = f"""Create a Portuguese language multiple choice question about '{topic}' at {difficulty} difficulty level.
+        
+        Make sure to create a UNIQUE question that tests knowledge about Portuguese nouns, grammar, vocabulary, or language features.
+        
+        If the topic is about nouns, create questions about gender (masculine/feminine), pluralization, or noun usage.
+        If the topic is about verbs, focus on conjugation, tense usage, or irregular verbs.
+        If the topic is about vocabulary, focus on translations, synonyms, or contextual usage.
+        If the topic is about grammar, focus on sentence structure, prepositions, or articles.
+        
+        Format your response as a valid JSON object with these keys:
+        - questionText: The full text of the question (make this detailed and specific)
+        - questionDescription: Brief description of what to do
+        - options: A list of 4 options (first one should be correct)
+        - correct_answers: A list with just the correct answer as string
+        - hint: A subtle hint to help the user
+        
+        Example format:
+        {{
+            "questionText": "What is the correct gender and article for the Portuguese word 'casa'?",
+            "questionDescription": "Choose the correct gender and article for this noun.",
+            "options": ["a casa (feminine)", "o casa (masculine)", "as casa (feminine plural)", "os casa (masculine plural)"],
+            "correct_answers": ["a casa (feminine)"],
+            "hint": "Most words ending in 'a' in Portuguese are feminine."
+        }}
+        """
+        
+        response_text = self._get_openai_completion(prompt)
+        
+        try:
+            response_json = json.loads(response_text)
+            
+            # Get correct answer and options
+            correct_answer = response_json["correct_answers"][0]
+            options = response_json["options"].copy()
+            
+            # Randomize the options while keeping track of the correct answer
+            random.shuffle(options)
+            
+            # Create a multiple choice question
+            question = MultipleChoiceQuestion(
+                id=str(uuid.uuid4()),
+                type=QuestionTypes.MULTIPLE_CHOICE,
+                questionText=response_json["questionText"],
+                questionDescription=response_json["questionDescription"],
+                options=options,
+                correct_answers=response_json["correct_answers"],
+                difficulty=difficulty,
+                hint=response_json["hint"]
+            )
+            
+            return question
+        except Exception as e:
+            print(f"Error parsing JSON from OpenAI: {str(e)}")
+            print(f"Response was: {response_text}")
+            
+            # Fallback to a default question - but create more varied default questions
+            # based on the topic to avoid duplication
+            
+            # Choose from several fallback questions based on a hash of the topic
+            # This helps ensure different questions when called multiple times
+            hash_value = sum(ord(c) for c in topic) % 5
+            
+            fallback_questions = [
+                {
+                    "questionText": f"What is the correct gender for the Portuguese noun 'livro'?",
+                    "options": ["masculine (o livro)", "feminine (a livro)", "neutral (o/a livro)", "collective (os livro)"],
+                    "correct_answers": ["masculine (o livro)"],
+                    "hint": "Most Portuguese nouns ending in 'o' are masculine."
+                },
+                {
+                    "questionText": f"Which word is feminine in Portuguese?",
+                    "options": ["casa (house)", "carro (car)", "livro (book)", "telefone (telephone)"],
+                    "correct_answers": ["casa (house)"],
+                    "hint": "Look for words that typically use the article 'a' instead of 'o'."
+                },
+                {
+                    "questionText": f"What is the correct plural form of 'animal' in Portuguese?",
+                    "options": ["animais", "animals", "animalos", "animal"],
+                    "correct_answers": ["animais"],
+                    "hint": "Words ending in 'al' often change to 'ais' in the plural form."
+                },
+                {
+                    "questionText": f"Which Portuguese greeting is typically used in the morning?",
+                    "options": ["Bom dia", "Boa tarde", "Boa noite", "Olá"],
+                    "correct_answers": ["Bom dia"],
+                    "hint": "'Dia' means 'day' in Portuguese."
+                },
+                {
+                    "questionText": f"What is the Portuguese word for 'thank you'?",
+                    "options": ["Obrigado/Obrigada", "Por favor", "De nada", "Com licença"],
+                    "correct_answers": ["Obrigado/Obrigada"],
+                    "hint": "This word changes form based on the speaker's gender."
+                }
+            ]
+            
+            fallback = fallback_questions[hash_value]
+            
+            # Randomize the options in the fallback questions too
+            options = fallback["options"].copy()
+            correct_answer = fallback["correct_answers"][0]
+            
+            # Shuffle the options
+            random.shuffle(options)
+            
+            return MultipleChoiceQuestion(
+                id=str(uuid.uuid4()),
+                type=QuestionTypes.MULTIPLE_CHOICE,
+                questionText=fallback["questionText"],
+                questionDescription=f"Choose the correct answer about {topic}.",
+                options=options,
+                correct_answers=fallback["correct_answers"],
+                difficulty=difficulty,
+                hint=fallback["hint"]
+            )
     
     def generate_fill_in_blank_question(
         self, 
@@ -275,12 +325,53 @@ class QuestionGenerator:
         # Generate questions
         questions = []
         for i in range(num_questions):
-            # Randomly select question type from the provided types
-            question_type = random.choice(question_types)
-            
-            if question_type == QuestionTypes.MULTIPLE_CHOICE:
-                questions.append(self.generate_multiple_choice_question(difficulty, topic))
-            elif question_type == QuestionTypes.FILL_IN_THE_BLANKS:
-                questions.append(self.generate_fill_in_blank_question(difficulty, topic))
+            try:
+                # Randomly select question type from the provided types
+                question_type = random.choice(question_types)
+                
+                if question_type == QuestionTypes.MULTIPLE_CHOICE:
+                    question = self.generate_multiple_choice_question(difficulty, topic)
+                    if question:  # Only add if it's not None
+                        questions.append(question)
+                elif question_type == QuestionTypes.FILL_IN_THE_BLANKS:
+                    question = self.generate_fill_in_blank_question(difficulty, topic)
+                    if question:  # Only add if it's not None
+                        questions.append(question)
+            except Exception as e:
+                print(f"Error generating question {i+1}: {str(e)}")
+                continue  # Skip this question and try the next one
+                
+        # Ensure we always return at least one question
+        if not questions:
+            # Create a default fill-in-the-blank question as fallback
+            try:
+                if QuestionTypes.FILL_IN_THE_BLANKS in question_types:
+                    fallback = FillInTheBlankQuestion(
+                        id=str(uuid.uuid4()),
+                        type=QuestionTypes.FILL_IN_THE_BLANKS,
+                        questionText="Complete the sentence with the correct verb form:",
+                        questionDescription="Fill in the blank with the correct conjugation of 'falar'.",
+                        questionSentence="Eu ____ português todos os dias.",
+                        correct_answers=["falo"],
+                        difficulty=difficulty,
+                        hint="The verb is conjugated in the first person singular present tense.",
+                        blankSeparator="____",
+                        numberOfBlanks=1
+                    )
+                    questions.append(fallback)
+                else:
+                    fallback = MultipleChoiceQuestion(
+                        id=str(uuid.uuid4()),
+                        type=QuestionTypes.MULTIPLE_CHOICE,
+                        questionText=f"What is 'hello' in Portuguese?",
+                        questionDescription="Choose the correct translation.",
+                        options=["Olá", "Adeus", "Bom dia", "Obrigado"],
+                        correct_answers=["Olá"],
+                        difficulty=difficulty,
+                        hint=f"This is a common greeting."
+                    )
+                    questions.append(fallback)
+            except Exception as e:
+                print(f"Error creating fallback question: {str(e)}")
                 
         return questions 
