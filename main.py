@@ -6,7 +6,11 @@ from dotenv import load_dotenv
 import openai
 import json
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
+from passlib.context import CryptContext
+from pydantic import BaseModel, EmailStr, Field
+from jose import JWTError, jwt
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials, OAuth2PasswordBearer
 
 # Import models and question generator
 from models import (
@@ -16,7 +20,8 @@ from models import (
     UserAnswer, AnswerEvaluation, UserAnswerResponse, 
     ConversationCreate, ConversationResponse,
     ConversationListResponse, Message, ConversationHistoryResponse,
-    GetOrCreateConversation, ProcessMessage, ProcessMessageResponse
+    GetOrCreateConversation, ProcessMessage, ProcessMessageResponse,
+    UserCreate, AppUser, UserSettings, UserSettingsCreate, UserSettingsUpdate
 )
 from question_generator import QuestionGenerator
 # Use MongoDB conversation manager
@@ -105,7 +110,55 @@ async def create_openai_completion(messages, model="gpt-3.5-turbo"):
         return DummyResponse()
 
 # Initialize FastAPI app
-app = FastAPI(title="Portagees Chat API", description="API for the Portagees language learning chat application")
+app = FastAPI(
+    title="Portagees Chat API", 
+    description="API for the Portagees language learning chat application",
+    version="1.0.0"
+)
+
+# Configure security scheme for Swagger UI
+security_scheme = HTTPBearer(
+    description="Enter 'Bearer your-token' to authenticate",
+    auto_error=False
+)
+
+# Add security scheme to OpenAPI
+app.swagger_ui_init_oauth = {
+    "usePkceWithAuthorizationCodeGrant": True,
+    "useBasicAuthenticationWithAccessCodeGrant": True
+}
+
+# Add security definitions to OpenAPI schema
+app.openapi_schema = None  # Reset schema so it's regenerated with our modifications
+
+def custom_openapi():
+    if app.openapi_schema:
+        return app.openapi_schema
+    
+    # Get the original openapi schema
+    openapi_schema = FastAPI.openapi(app)
+    
+    # Add security scheme component
+    if "components" not in openapi_schema:
+        openapi_schema["components"] = {}
+    
+    if "securitySchemes" not in openapi_schema["components"]:
+        openapi_schema["components"]["securitySchemes"] = {}
+    
+    openapi_schema["components"]["securitySchemes"]["Bearer"] = {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "Enter your JWT token in the format: Bearer your-token"
+    }
+    
+    # Add global security requirement
+    openapi_schema["security"] = [{"Bearer": []}]
+    
+    app.openapi_schema = openapi_schema
+    return app.openapi_schema
+
+app.openapi = custom_openapi
 
 # Configure CORS
 app.add_middleware(
@@ -1276,6 +1329,387 @@ async def process_message(message_data: ProcessMessage):
             status_code=500,
             detail=f"Error processing message: {str(e)}"
         )
+
+# Initialize password context
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+# JWT configuration
+SECRET_KEY = os.getenv("SECRET_KEY", "09d25e094faa6ca2556c818166b7a9563b93f7099f6f0f4caa6cf63b88e8d3e7")
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24 hours
+
+# User signup schema
+class UserSignup(BaseModel):
+    email: EmailStr
+    username: str
+    password: str
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+
+# User signup response
+class UserSignupResponse(BaseModel):
+    message: str
+    user_id: str
+
+# Login schema
+class UserLogin(BaseModel):
+    email: EmailStr
+    password: str
+
+# Token schema
+class Token(BaseModel):
+    access_token: str
+    token_type: str
+    user_id: str
+    email: str
+    username: str
+    first_name: str
+    last_name: str
+
+# Function to create access token
+def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
+    to_encode = data.copy()
+    expire = datetime.utcnow() + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return encoded_jwt
+
+# User signup endpoint
+@app.post("/api/signup", response_model=UserSignupResponse)
+async def signup(user_data: UserSignup):
+    """Register a new user"""
+    # Get database connection
+    from database import db
+    
+    # Check if email already exists
+    existing_user = db.app_users.find_one({"email": user_data.email})
+    if existing_user:
+        raise HTTPException(status_code=400, detail="Email already registered")
+    
+    # Check if username already exists
+    existing_username = db.app_users.find_one({"username": user_data.username})
+    if existing_username:
+        raise HTTPException(status_code=400, detail="Username already taken")
+
+    try:
+        # Hash the password
+        hashed_password = pwd_context.hash(user_data.password)
+        
+        # Generate a user ID
+        user_id = str(uuid.uuid4())
+        
+        # Create user object
+        new_user = AppUser(
+            _id=user_id,
+            email=user_data.email,
+            username=user_data.username,
+            first_name=user_data.first_name or "",
+            last_name=user_data.last_name or "",
+            hashed_password=hashed_password,
+            is_active=True,
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow()
+        )
+        
+        # Save user to database using the AppUser model
+        user_dict = new_user.dict()
+        result = db.app_users.insert_one(user_dict)
+        
+        # Return success response with the user ID
+        return UserSignupResponse(
+            message="User successfully created",
+            user_id=user_id
+        )
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error creating user: {str(e)}"
+        )
+
+# Login endpoint
+@app.post("/api/login", response_model=Token)
+async def login(user_data: UserLogin):
+    """Authenticate a user and return a JWT token"""
+    try:
+        # Get database connection
+        from database import db
+        
+        # Find user by email in app_users collection
+        user = db.app_users.find_one({"email": user_data.email})
+        if not user:
+            raise HTTPException(status_code=401, detail="Invalid email or password")
+        
+        # Verify password
+        if not pwd_context.verify(user_data.password, user["hashed_password"]):
+            raise HTTPException(status_code=401, detail="Invalid email or password")
+        
+        # Create access token - ensure all data is JSON serializable
+        user_id = str(user["_id"])  # Convert ObjectId to string if needed
+        
+        token_data = {
+            "sub": user["email"],
+            "user_id": user_id
+        }
+        token = create_access_token(token_data)
+        
+        # Return token with user profile data
+        return Token(
+            access_token=token,
+            token_type="bearer",
+            user_id=user_id,
+            email=user["email"],
+            username=user["username"],
+            first_name=user["first_name"],
+            last_name=user["last_name"]
+        )
+        
+    except Exception as e:
+        import traceback
+        print(traceback.format_exc())
+        raise HTTPException(
+            status_code=500,
+            detail=f"Login error: {str(e)}"
+        )
+
+# Updated get_current_user to use the security scheme
+async def get_current_user(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials = Depends(security_scheme),
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Authenticate and return the current user based on the JWT token.
+    Now accepts tokens from both the HTTPBearer security scheme and Header.
+    """
+    # Debug all request headers
+    print("All headers:")
+    for key, value in request.headers.items():
+        print(f"  {key}: {value}")
+    
+    # Try to get token from security scheme first (Swagger UI's Authorization)
+    token = None
+    if credentials and credentials.credentials:
+        print(f"Token found in security scheme: {credentials.credentials[:10]}...")
+        token = credentials.credentials
+    # Otherwise try the Authorization header
+    elif authorization:
+        print(f"Authorization header found: {authorization}")
+        try:
+            scheme, token_value = authorization.split()
+            if scheme.lower() != "bearer":
+                raise HTTPException(status_code=401, detail="Invalid authentication scheme, must be Bearer")
+            token = token_value
+        except ValueError:
+            raise HTTPException(status_code=401, detail="Invalid authorization header format")
+    else:
+        # Check for token in query parameters as fallback
+        token_param = request.query_params.get("token")
+        if token_param:
+            print(f"Token found in query parameter: {token_param[:10]}...")
+            token = token_param
+    
+    # If still no token, check for cookie
+    if not token:
+        access_token = request.cookies.get("access_token")
+        if access_token:
+            print(f"Token found in cookie: {access_token[:10]}...")
+            token = access_token
+    
+    if not token:
+        raise HTTPException(
+            status_code=401, 
+            detail="Not authenticated. Please provide a valid Bearer token in Authorization header."
+        )
+    
+    try:
+        print(f"Token: {token}")
+        # Decode JWT token
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        user_id = payload.get("user_id")
+        print(f"User ID: {user_id}")
+        if user_id is None:
+            raise HTTPException(status_code=401, detail="Invalid token: missing user_id")
+        
+        # Get user from database
+        from database import db
+        # Try to find user by string ID first
+        user = db.app_users.find_one({"_id": user_id})
+        
+        # If not found, try other possible formats
+        if user is None:
+            # Try to find by string representation of ID
+            try:
+                from bson import ObjectId
+                # Check if the user_id is a valid ObjectId
+                if ObjectId.is_valid(user_id):
+                    user = db.app_users.find_one({"_id": ObjectId(user_id)})
+            except Exception as e:
+                print(f"Error converting to ObjectId: {str(e)}")
+        
+        if user is None:
+            raise HTTPException(status_code=404, detail=f"User not found with ID: {user_id}")
+            
+        return user
+    except JWTError as e:
+        raise HTTPException(status_code=401, detail=f"Invalid token: {str(e)}")
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        print(f"Authentication error: {str(e)}\n{error_details}")
+        raise HTTPException(status_code=401, detail=f"Authentication error: {str(e)}")
+
+# User settings endpoints
+@app.get("/api/user/settings", summary="Get user settings")
+async def get_user_settings(user=Depends(get_current_user)):
+    """Get settings for the current user"""
+    try:
+        from database import db
+        user_id = str(user["_id"])
+        print(f"Getting settings for user ID: {user_id}")
+        
+        # Find user settings
+        settings = db.user_settings.find_one({"user_id": user_id})
+        
+        if not settings:
+            print(f"No settings found for user ID: {user_id}, returning defaults")
+            # Return default settings if none exist
+            return UserSettings(
+                user_id=user_id,
+                preferred_language="Portuguese",
+                notification_enabled=True
+            )
+        
+        # Convert MongoDB ObjectId to string
+        if "_id" in settings:
+            settings["_id"] = str(settings["_id"])
+            
+        return settings
+        
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        print(f"Error retrieving user settings: {str(e)}\n{error_details}")
+        raise HTTPException(status_code=500, detail=f"Error retrieving user settings: {str(e)}")
+
+@app.post("/api/user/settings", summary="Create user settings")
+async def create_user_settings(settings_data: UserSettingsCreate, user=Depends(get_current_user)):
+    """Create settings for the current user"""
+    try:
+        from database import db
+        user_id = str(user["_id"])
+        print(f"Creating settings for user ID: {user_id}")
+        
+        # Check if settings already exist
+        existing_settings = db.user_settings.find_one({"user_id": user_id})
+        if existing_settings:
+            raise HTTPException(status_code=400, detail="Settings already exist for this user. Use PUT to update.")
+        
+        # Create new settings
+        new_settings = UserSettings(
+            _id=str(uuid.uuid4()),
+            user_id=user_id,
+            preferred_language=settings_data.preferred_language,
+            notification_enabled=settings_data.notification_enabled,
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow()
+        )
+        
+        # Insert into database
+        settings_dict = new_settings.dict()
+        print(f"Inserting new settings: {settings_dict}")
+        result = db.user_settings.insert_one(settings_dict)
+        print(f"Insert result: {result.inserted_id}")
+        
+        return new_settings
+        
+    except HTTPException as e:
+        # Re-raise HTTP exceptions as-is
+        raise e
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        print(f"Error creating user settings: {str(e)}\n{error_details}")
+        raise HTTPException(status_code=500, detail=f"Error creating user settings: {str(e)}")
+
+@app.put("/api/user/settings", summary="Update user settings")
+async def update_user_settings(settings_data: UserSettingsUpdate, user=Depends(get_current_user)):
+    """Update settings for the current user"""
+    try:
+        from database import db
+        user_id = str(user["_id"])
+        print(f"Updating settings for user ID: {user_id}")
+        
+        # Find existing settings
+        existing_settings = db.user_settings.find_one({"user_id": user_id})
+        print(f"Existing settings found: {existing_settings is not None}")
+        
+        if not existing_settings:
+            # Create new settings if none exist
+            settings_id = str(uuid.uuid4())
+            new_settings = UserSettings(
+                _id=settings_id,
+                user_id=user_id,
+                preferred_language=settings_data.preferred_language or "Portuguese",
+                notification_enabled=settings_data.notification_enabled if settings_data.notification_enabled is not None else True,
+                created_at=datetime.utcnow(),
+                updated_at=datetime.utcnow()
+            )
+            
+            settings_dict = new_settings.dict()
+            print(f"Creating new settings during update: {settings_dict}")
+            result = db.user_settings.insert_one(settings_dict)
+            print(f"Insert result: {result.inserted_id}")
+            
+            # Get the newly created settings
+            updated_settings = db.user_settings.find_one({"_id": settings_id})
+            if updated_settings is None:
+                print(f"Warning: Could not find newly created settings with ID {settings_id}")
+                # Return the model we just created as fallback
+                return new_settings
+                
+            if "_id" in updated_settings:
+                updated_settings["_id"] = str(updated_settings["_id"])
+                
+            return updated_settings
+        
+        # Prepare update data
+        update_data = {}
+        if settings_data.preferred_language is not None:
+            update_data["preferred_language"] = settings_data.preferred_language
+        if settings_data.notification_enabled is not None:
+            update_data["notification_enabled"] = settings_data.notification_enabled
+        
+        # Add updated timestamp
+        update_data["updated_at"] = datetime.utcnow()
+        
+        print(f"Updating settings with data: {update_data}")
+        
+        # Update settings
+        update_result = db.user_settings.update_one(
+            {"user_id": user_id},
+            {"$set": update_data}
+        )
+        print(f"Update result: matched={update_result.matched_count}, modified={update_result.modified_count}")
+        
+        # Get updated settings
+        updated_settings = db.user_settings.find_one({"user_id": user_id})
+        if updated_settings is None:
+            raise HTTPException(status_code=404, detail="Settings not found after update")
+            
+        if "_id" in updated_settings:
+            updated_settings["_id"] = str(updated_settings["_id"])
+            
+        return updated_settings
+        
+    except HTTPException as e:
+        # Re-raise HTTP exceptions as-is
+        raise e
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        print(f"Error updating user settings: {str(e)}\n{error_details}")
+        raise HTTPException(status_code=500, detail=f"Error updating user settings: {str(e)}")
 
 # Run with: uvicorn main:app --reload
 if __name__ == "__main__":

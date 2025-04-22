@@ -1,6 +1,7 @@
 from pydantic import BaseModel, Field
 from typing import List, Optional, Union, Literal, Dict, Any
 import enum
+from datetime import datetime
 
 # Define enums and constants
 class MessageSenders(str, enum.Enum):
@@ -141,4 +142,42 @@ class ProcessMessageResponse(BaseModel):
     message: str
     topic: Optional[str] = None
     difficulty: Optional[str] = None
-    questions: Optional[Dict[str, List[Dict[str, Any]]]] = None 
+    questions: Optional[Dict[str, List[Dict[str, Any]]]] = None
+
+# User related models
+class UserCreate(BaseModel):
+    email: str
+    username: str
+    first_name: str
+    last_name: str
+    hashed_password: str
+    is_active: bool = True
+
+class AppUser(BaseModel):
+    _id: Optional[str] = None
+    email: str
+    username: str
+    first_name: str
+    last_name: str
+    hashed_password: str
+    is_active: bool = True
+    created_at: datetime = Field(default_factory=lambda: datetime.utcnow())
+    updated_at: datetime = Field(default_factory=lambda: datetime.utcnow())
+
+# User Settings models
+class UserSettingsCreate(BaseModel):
+    user_id: str
+    preferred_language: str = "Portuguese"
+    notification_enabled: bool = True
+
+class UserSettingsUpdate(BaseModel):
+    preferred_language: Optional[str] = None
+    notification_enabled: Optional[bool] = None
+
+class UserSettings(BaseModel):
+    _id: Optional[str] = None
+    user_id: str  # Foreign key to AppUser
+    preferred_language: str = "Portuguese"
+    notification_enabled: bool = True
+    created_at: datetime = Field(default_factory=lambda: datetime.utcnow())
+    updated_at: datetime = Field(default_factory=lambda: datetime.utcnow()) 
