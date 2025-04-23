@@ -900,7 +900,7 @@ async def process_message(message_data: ProcessMessage):
             )
             
             # Generate a polite response redirecting to Portuguese learning
-            off_topic_response = "I'm designed to help you learn Portuguese. I can provide information about Portuguese vocabulary, grammar, and culture, or give you practice exercises. How can I help you with your Portuguese learning today?"
+            off_topic_response = "Insufficient information to respond"
             
             MongoDBConversationManager.add_message(
                 conversation_id=conversation_id,
