@@ -858,7 +858,21 @@ async def process_message(message_data: ProcessMessage):
         topic = message_data.topic
         
         print(f"Process message request: conversation_id={conversation_id}, message='{user_message}', topic='{topic}'")
-        
+        try:
+            cms_data = await fetch_prompt_from_cms(topic)
+            print(f"Received CMS data: {cms_data}")
+            
+            # Extract prompt from CMS response
+            cms_prompt = cms_data.get('prompt', '')
+            if not cms_prompt:
+                print("Warning: No prompt received from CMS, using default system prompt")
+                cms_prompt = """You are an AI assistant for Portuguese language learning. 
+                Only respond to queries related to the Portuguese language, Portugal, or Portuguese culture."""
+        except Exception as e:
+            print(f"Error getting prompt from CMS: {str(e)}")
+            # Fallback to default prompt if CMS call fails
+            cms_prompt = """You are an AI assistant for Portuguese language learning. 
+            Only respond to queries related to the Portuguese language, Portugal, or Portuguese culture."""
         # Use OpenAI to detect intent rather than keywords
         intent_prompt = [
             {"role": "system", "content": "You are an AI assistant that can detect user intent. Your task is to classify if the user is asking for practice exercises/quiz/questions to test their knowledge, or if they're having a general conversation seeking information. When the user wants a quiz or exercises to practice Portuguese, classify as 'question_generation' AND specify the question type as either 'multiple_choice' or 'fill_in_the_blanks' based on what the user is asking for. Pay careful attention to any specific topic the user mentions they want questions about. For general information or conversation, including questions about vocabulary, grammar rules, common phrases, or language information, classify as 'general_chat'. If the user's request is unrelated to Portuguese language learning, classify as 'off_topic'. Respond with ONLY 'question_generation:multiple_choice', 'question_generation:fill_in_the_blanks', 'general_chat', or 'off_topic'."},
@@ -1263,8 +1277,24 @@ async def process_message(message_data: ProcessMessage):
             print(f"Processing general chat for topic: {topic}")
             
             # Create context with topic to maintain the conversation focus
+            # context_messages = [
+            #     {"role": "system", "content": f"You are a Portuguese language assistant. The user is studying about '{topic}'. Keep your responses focused on this topic when relevant."}
+            # ]
+            system_prompt = f"""
+            You are a Portuguese language assistant. The user is studying about '{topic}'. 
+            Keep your responses focused on this '{topic}' when relevant. 
+            Format your response in HTML for readability, using:
+            - <p> tags for paragraphs
+            - <ul> and <li> for bullet points when listing items or examples
+            - <strong> for emphasis on key terms
+            - Avoid using scripts or potentially unsafe HTML
+            Ensure the response is clear, concise, and broken into logical sections.
+            Return the response wrapped in a single <div> tag.
+            """
+
+            # Create context with topic and history
             context_messages = [
-                {"role": "system", "content": f"You are a Portuguese language assistant. The user is studying about '{topic}'. Keep your responses focused on this topic when relevant."}
+                {"role": "system", "content": system_prompt}
             ]
             
             # Get conversation history to maintain context
@@ -1710,6 +1740,30 @@ async def update_user_settings(settings_data: UserSettingsUpdate, user=Depends(g
         error_details = traceback.format_exc()
         print(f"Error updating user settings: {str(e)}\n{error_details}")
         raise HTTPException(status_code=500, detail=f"Error updating user settings: {str(e)}")
+
+async def fetch_prompt_from_cms(topic_ids: str):
+    """Fetch prompt from CMS based on topic IDs"""
+    try:
+        import aiohttp
+        import json
+
+        cms_base_url = os.getenv("CMS_BASE_URL", "http://localhost:3000")
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"{cms_base_url}/get-prompt", params={"topicIds": topic_ids}) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    print(f"CMS Response: {data}")
+                    return data
+                else:
+                    error_text = await response.text()
+                    print(f"CMS API error: {error_text}")
+                    raise HTTPException(
+                        status_code=response.status,
+                        detail=f"Error from CMS API: {error_text}"
+                    )
+    except Exception as e:
+        print(f"Error fetching prompt from CMS: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error fetching prompt from CMS: {str(e)}")
 
 # Run with: uvicorn main:app --reload
 if __name__ == "__main__":
