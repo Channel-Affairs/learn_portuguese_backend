@@ -400,22 +400,26 @@ async def generate_ai_response(user_message: str, conversation_id: Optional[str]
         
         # Check if the response is app-related
         if not is_app_related_query(user_message):
-            # Create more friendly, conversational responses for off-topic questions
-            off_topic_responses = [
-                "Oh, while I'd love to chat about that, I'm actually your Portuguese language buddy! 😊 I'm here to help you learn Portuguese - would you like to know some fun Portuguese phrases instead?",
+            # Generate a contextual response redirecting to Portuguese learning
+            redirect_prompt = [
+                {"role": "system", "content": f"""
+                You are a Portuguese language learning assistant. The user has asked something off-topic.
                 
-                "That's an interesting topic! Though I'm actually specialized in Portuguese language learning. 🇵🇹 I'd be thrilled to help you discover something fascinating about Portuguese culture or language instead!",
+                Generate a friendly, conversational response that:
+                1. Briefly acknowledges their off-topic question in a warm, friendly way
+                2. Gently redirects them back to learning Portuguese
+                3. Specifically mentions their current topic: '{topic_name}'
+                4. Offers a specific suggestion, example, or question about '{topic_name}' to re-engage them
+                5. Format your response in HTML for readability using simple <p>, <strong> tags
                 
-                "I wish I could help with that, but Portuguese is my specialty! 🌟 How about we explore some beautiful Portuguese expressions or maybe learn about Portugal's amazing culture instead?",
-                
-                "While that's outside my Portuguese expertise, I'm super eager to help you learn something new about the Portuguese language! 🤩 Would you like to try a quick vocabulary exercise instead?",
-                
-                "I'm your friendly Portuguese language assistant, so that's not really my area. But hey, did you know that Portuguese has some really cool words that don't exist in English? Would you like to learn some?"
+                Keep your response friendly, helpful and concise (max 3 sentences).
+                """},
+                {"role": "user", "content": user_message}
             ]
             
-            # Select a random friendly response
-            import random
-            ai_response = random.choice(off_topic_responses)
+            # Get response from OpenAI
+            redirect_response = await create_openai_completion(messages=redirect_prompt)
+            ai_response = redirect_response.choices[0].message.content
         
         # Create response object
         text_content = ai_response.strip()
@@ -855,15 +859,27 @@ async def process_message(message_data: ProcessMessage):
         # Extract data from request
         conversation_id = message_data.conversation_id
         user_message = message_data.message
-        topic = message_data.topic
+        topic_ids = message_data.topic
+        difficulty = message_data.difficulty
+        num_questions = message_data.num_questions
+        # Default topic name if CMS fetch fails
+        topic_name = "Portuguese language"
         
-        print(f"Process message request: conversation_id={conversation_id}, message='{user_message}', topic='{topic}'")
+        print(f"Process message request: conversation_id={conversation_id}, message='{user_message}', topic_ids='{topic_ids}'")
+        
+        
         try:
-            cms_data = await fetch_prompt_from_cms(topic)
+            cms_data = await fetch_prompt_from_cms(topic_ids)
             print(f"Received CMS data: {cms_data}")
             
-            # Extract prompt from CMS response
-            cms_prompt = cms_data.get('prompt', '')
+            # Extract prompt and topic name from CMS response
+            if cms_data.get('data'):
+                cms_prompt = cms_data.get('data', {}).get('prompt', '')
+                topic_name = cms_data.get('data', {}).get('name', 'Portuguese language')
+                print(f"Extracted topic name from CMS: '{topic_name}'")
+            else:
+                cms_prompt = cms_data.get('prompt', '')
+                
             if not cms_prompt:
                 print("Warning: No prompt received from CMS, using default system prompt")
                 cms_prompt = """You are an AI assistant for Portuguese language learning. 
@@ -873,9 +889,21 @@ async def process_message(message_data: ProcessMessage):
             # Fallback to default prompt if CMS call fails
             cms_prompt = """You are an AI assistant for Portuguese language learning. 
             Only respond to queries related to the Portuguese language, Portugal, or Portuguese culture."""
-        # Use OpenAI to detect intent rather than keywords
+
+        # Use topic_name for intent detection
         intent_prompt = [
-            {"role": "system", "content": "You are an AI assistant that can detect user intent. Your task is to classify if the user is asking for practice exercises/quiz/questions to test their knowledge, or if they're having a general conversation seeking information. When the user wants a quiz or exercises to practice Portuguese, classify as 'question_generation' AND specify the question type as either 'multiple_choice' or 'fill_in_the_blanks' based on what the user is asking for. Pay careful attention to any specific topic the user mentions they want questions about. For general information or conversation, including questions about vocabulary, grammar rules, common phrases, or language information, classify as 'general_chat'. If the user's request is unrelated to Portuguese language learning, classify as 'off_topic'. Respond with ONLY 'question_generation:multiple_choice', 'question_generation:fill_in_the_blanks', 'general_chat', or 'off_topic'."},
+            {"role": "system", "content": f"""
+                You are a classifier for a Portuguese language learning app.
+                Classify if the user message is asking for:
+                - question_generation:multiple_choice - they want multiple choice questions about Portuguese
+                - question_generation:fill_in_the_blanks - they want fill-in-the-blank exercises for Portuguese
+                - general_chat - they want to generally talk about Portuguese language or related topics
+                - off_topic - they're asking about something not related to Portuguese
+                
+                They are currently learning about: {topic_name}
+                
+                Return ONLY one of these classifications without any explanation.
+                """},
             {"role": "user", "content": "Give me a quiz about Portuguese verbs"},
             {"role": "assistant", "content": "question_generation:multiple_choice"},
             {"role": "user", "content": "How do you say 'hello' in Portuguese?"},
@@ -913,8 +941,27 @@ async def process_message(message_data: ProcessMessage):
                 }
             )
             
-            # Generate a polite response redirecting to Portuguese learning
-            off_topic_response = "Insufficient information to respond"
+            # Generate a contextual response redirecting to Portuguese learning
+            # using OpenAI instead of hardcoded response
+            redirect_prompt = [
+                {"role": "system", "content": f"""
+                You are a Portuguese language learning assistant. The user has asked something off-topic.
+                
+                Generate a friendly, conversational response that:
+                1. Briefly acknowledges their off-topic question in a warm, friendly way
+                2. Gently redirects them back to learning Portuguese
+                3. Specifically mentions their current topic: '{topic_name}'
+                4. Offers a specific suggestion, example, or question about '{topic_name}' to re-engage them
+                5. Format your response in HTML for readability using simple <p>, <strong> tags
+                
+                Keep your response friendly, helpful and concise (max 3 sentences).
+                """},
+                {"role": "user", "content": user_message}
+            ]
+            
+            # Get response from OpenAI
+            redirect_response = await create_openai_completion(messages=redirect_prompt)
+            off_topic_response = redirect_response.choices[0].message.content
             
             MongoDBConversationManager.add_message(
                 conversation_id=conversation_id,
@@ -932,7 +979,8 @@ async def process_message(message_data: ProcessMessage):
                 "type": "text",
                 "intent": "off_topic",
                 "message": off_topic_response,
-                "topic": "Portuguese learning"
+                "topic": "Portuguese learning",
+                "topic_name": topic_name
             }
             return result
         
@@ -957,11 +1005,16 @@ async def process_message(message_data: ProcessMessage):
             
             try:
                 # Extract topic from user message if they're asking for specific questions
-                question_topic = topic  # Default to the current topic
+                question_topic = topic_name  # Default to the current topic
                 
                 # Try to extract a more specific topic from the user message
                 topic_extraction_prompt = [
-                    {"role": "system", "content": "Extract the specific topic the user wants questions about from their message. Pay special attention to any Portuguese grammar concepts, vocabulary categories, or language features mentioned. Return ONLY the topic, no extra text or explanation."},
+                    {"role": "system", "content": f"""
+                    Extract the specific topic the user wants questions about from their message. 
+                    Pay special attention to any Portuguese grammar concepts, vocabulary categories, or language features mentioned.
+                    The user is currently studying: {topic_name}
+                    Return ONLY the topic, no extra text or explanation.
+                    """},
                     {"role": "user", "content": "Give me questions about Portuguese verb conjugation"},
                     {"role": "assistant", "content": "Portuguese verb conjugation"},
                     {"role": "user", "content": "I want to practice Portuguese greetings"},
@@ -982,20 +1035,23 @@ async def process_message(message_data: ProcessMessage):
                     question_topic = extracted_topic
                     print(f"Extracted specific topic: '{question_topic}' from user message")
                 else:
-                    # If we couldn't extract a specific topic, but one was provided in the API call, use that
-                    if topic and topic.lower() != "portuguese language":
-                        question_topic = topic
-                        print(f"Using topic from API call: '{question_topic}'")
-                    else:
-                        # Default to a generic topic
-                        question_topic = "Portuguese language basics"
-                        print(f"Using default topic: '{question_topic}'")
+                    # If we couldn't extract a specific topic, use the topic name from CMS
+                    question_topic = topic_name
+                    print(f"Using topic name from CMS: '{question_topic}'")
                 
                 # Debug prints
                 print(f"Generating questions with topic={question_topic}, num_questions={num_questions}, difficulty={difficulty}, question_types={question_type}")
                 
                 # Make sure we convert difficulty to string for the response
                 difficulty_str = difficulty.value if hasattr(difficulty, 'value') else difficulty
+                
+                # Add cms_prompt to the question generation context if available
+                if cms_prompt:
+                    # Configure the question generator with the custom prompt
+                    question_generator.configure_custom_prompt(
+                        f"You are generating questions about {question_topic}. {cms_prompt}"
+                    )
+                    print("Using custom CMS prompt for question generation")
                 
                 # Generate questions with appropriate type
                 print(f"About to call question_generator.generate_questions with: topic={question_topic}, num_questions={num_questions}, difficulty={difficulty}, question_types={question_type}")
@@ -1006,12 +1062,18 @@ async def process_message(message_data: ProcessMessage):
                     adjusted_num_questions = num_questions * 3  # Generate 3x as many to ensure uniqueness
                     print(f"Adjusted number of questions for multiple choice to {adjusted_num_questions} to ensure {num_questions} unique questions")
                 
-                questions = question_generator.generate_questions(
-                    topic=question_topic,
-                    num_questions=adjusted_num_questions,
-                    difficulty=difficulty,
-                    question_types=question_type
-                )
+                try:
+                    questions = question_generator.generate_questions(
+                        topic=question_topic,
+                        num_questions=adjusted_num_questions,
+                        difficulty=difficulty,
+                        question_types=question_type
+                    )
+                finally:
+                    # Reset the custom prompt after generating questions
+                    if cms_prompt:
+                        question_generator.configure_custom_prompt(None)
+                        print("Reset custom prompt in question generator")
                 
                 if not questions:
                     print("Warning: No questions were generated. Using fallback questions.")
@@ -1258,7 +1320,8 @@ async def process_message(message_data: ProcessMessage):
                     "message": response_content,
                     "topic": question_topic,
                     "difficulty": difficulty_str,
-                    "questions": all_questions
+                    "questions": all_questions,
+                    "topic_name": topic_name
                 }
                 
                 print(f"Returning result with {len(all_questions)} questions")
@@ -1274,15 +1337,14 @@ async def process_message(message_data: ProcessMessage):
                 )
         else:
             # General conversation logic - print more debug information
-            print(f"Processing general chat for topic: {topic}")
+            print(f"Processing general chat for topic: {topic_name}")
             
-            # Create context with topic to maintain the conversation focus
-            # context_messages = [
-            #     {"role": "system", "content": f"You are a Portuguese language assistant. The user is studying about '{topic}'. Keep your responses focused on this topic when relevant."}
-            # ]
+            # Create context with topic to maintain the conversation focus and incorporate CMS prompt
             system_prompt = f"""
-            You are a Portuguese language assistant. The user is studying about '{topic}'. 
-            Keep your responses focused on this '{topic}' when relevant. 
+            You are a Portuguese language assistant. The user is studying about '{topic_name}'. 
+            {cms_prompt}
+            
+            Keep your responses focused on this '{topic_name}' when relevant. 
             Format your response in HTML for readability, using:
             - <p> tags for paragraphs
             - <ul> and <li> for bullet points when listing items or examples
@@ -1346,7 +1408,8 @@ async def process_message(message_data: ProcessMessage):
                 "type": "text",
                 "intent": "general_chat",
                 "message": ai_message,
-                "topic": topic
+                "topic": topic_ids,
+                "topic_name": topic_name
             }
             print(f"Result: {result}")
             return result
@@ -1748,12 +1811,35 @@ async def fetch_prompt_from_cms(topic_ids: str):
         import json
 
         cms_base_url = os.getenv("CMS_BASE_URL", "http://localhost:3000/api")
+        print(f"Fetching prompt from CMS for topic_ids: {topic_ids}")
+        
         async with aiohttp.ClientSession() as session:
             async with session.get(f"{cms_base_url}/get-prompt", params={"topicIds": topic_ids}) as response:
                 if response.status == 200:
                     data = await response.json()
                     print(f"CMS Response: {data}")
-                    return data
+                    
+                    # Make sure we properly extract the data from the CMS response structure
+                    if data.get('success') and data.get('data'):
+                        return {
+                            'success': True,
+                            'data': {
+                                'id': data['data'].get('id', ''),
+                                'name': data['data'].get('name', 'Portuguese language'),
+                                'description': data['data'].get('description', ''),
+                                'prompt': data['data'].get('prompt', ''),
+                                'examples': data['data'].get('examples', [])
+                            }
+                        }
+                    else:
+                        print(f"Warning: CMS response missing expected structure: {data}")
+                        return {
+                            'success': False,
+                            'data': {
+                                'name': 'Portuguese language',
+                                'prompt': ''
+                            }
+                        }
                 else:
                     error_text = await response.text()
                     print(f"CMS API error: {error_text}")
@@ -1763,7 +1849,13 @@ async def fetch_prompt_from_cms(topic_ids: str):
                     )
     except Exception as e:
         print(f"Error fetching prompt from CMS: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error fetching prompt from CMS: {str(e)}")
+        return {
+            'success': False,
+            'data': {
+                'name': 'Portuguese language',
+                'prompt': ''
+            }
+        }
 
 # Run with: uvicorn main:app --reload
 if __name__ == "__main__":

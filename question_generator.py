@@ -15,6 +15,7 @@ class QuestionGenerator:
         """Initialize the question generator with OpenAI API key"""
         self.openai_api_key = openai_api_key
         self.question_templates = self._load_question_templates()
+        self.custom_prompt = None  # Store custom prompt from CMS
     
     def _load_question_templates(self):
         """Load question templates for different difficulty levels"""
@@ -66,6 +67,11 @@ class QuestionGenerator:
             }
         }
     
+    def configure_custom_prompt(self, prompt: str):
+        """Set a custom prompt to use in question generation"""
+        self.custom_prompt = prompt
+        print(f"Custom prompt set: {prompt[:50]}...")
+    
     def _get_openai_completion(self, prompt: str) -> str:
         """Get completion from OpenAI without using async"""
         try:
@@ -78,10 +84,13 @@ class QuestionGenerator:
                 "Authorization": f"Bearer {self.openai_api_key}"
             }
             
+            # Use custom prompt if available
+            system_content = self.custom_prompt if self.custom_prompt else "You are a Portuguese language expert."
+            
             data = {
                 "model": "gpt-3.5-turbo",
                 "messages": [
-                    {"role": "system", "content": "You are a Portuguese language expert."},
+                    {"role": "system", "content": system_content},
                     {"role": "user", "content": prompt}
                 ],
                 "temperature": 0.7

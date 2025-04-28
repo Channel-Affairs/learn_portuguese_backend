@@ -132,7 +132,7 @@ class GetOrCreateConversation(BaseModel):
 class ProcessMessage(BaseModel):
     conversation_id: str
     message: str
-    topic: Optional[str] = "Portuguese language"
+    topic: Optional[str] = Field(default="Portuguese language", description="Topic IDs separated by hyphens for hierarchical grammar rule selection")
     difficulty: Optional[DifficultyLevel] = DifficultyLevel.MEDIUM
     num_questions: Optional[int] = Field(default=2, ge=1, le=5)
 
@@ -141,6 +141,7 @@ class ProcessMessageResponse(BaseModel):
     intent: str
     message: str
     topic: Optional[str] = None
+    topic_name: Optional[str] = None
     difficulty: Optional[str] = None
     questions: Optional[Dict[str, List[Dict[str, Any]]]] = None
 
