@@ -67,10 +67,13 @@ class QuestionGenerator:
             }
         }
     
-    def configure_custom_prompt(self, prompt: str):
-        """Set a custom prompt to use in question generation"""
+    def configure_custom_prompt(self, prompt: Optional[str] = None):
+        """Configure a custom prompt for question generation"""
         self.custom_prompt = prompt
-        print(f"Custom prompt set: {prompt[:50]}...")
+        if prompt is not None:
+            print(f"Custom prompt set: {prompt[:50]}...")
+        else:
+            print("Custom prompt reset to default")
     
     def _get_openai_completion(self, prompt: str) -> str:
         """Get completion from OpenAI without using async"""
