@@ -25,7 +25,7 @@ class ConversationManager:
         """Add a message to the conversation"""
         return MongoDBConversationManager.add_message(conversation_id, message)
     
-    def get_conversation_history(self, conversation_id: str, limit: int = 10) -> List[Dict[str, Any]]:
+    def get_conversation_history(self, conversation_id: str, limit: int = 50) -> List[Dict[str, Any]]:
         """Get the conversation history"""
         return MongoDBConversationManager.get_conversation_history(conversation_id, limit)
     

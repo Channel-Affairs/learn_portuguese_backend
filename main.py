@@ -183,14 +183,32 @@ def get_next_message_id():
 
 # Function to check if a query is app-related
 def is_app_related_query(query: str) -> bool:
-    # Check if query is related to Portuguese language learning
+    """
+    Check if query is related to Portuguese language learning.
+    Short responses like "yes", "no", "maybe" are considered app-related
+    as they could be answers to previous questions in conversation.
+    """
+    # Common short responses should be considered app-related
+    # as they're likely responses to previous conversation
+    short_responses = [
+        "yes", "no", "maybe", "ok", "okay", "sure", 
+        "thanks", "thank you", "correct", "incorrect",
+        "i do", "i don't", "i can", "i can't", "i cannot",
+        "sim", "não", "obrigado", "obrigada", "hello", "hi", "hey"
+    ]
+    
+    query_lower = query.lower().strip()
+    
+    # If it's a very short answer, consider it app-related
+    if query_lower in short_responses or len(query_lower.split()) <= 3:
+        return True
+    
+    # Portuguese language related keywords
     portuguese_keywords = [
         "portuguese", "portugal", "learn", "language", "speak", "words", 
         "grammar", "vocabulary", "phrase", "sentence", "conjugate", "verb",
         "noun", "pronoun", "translation", "meaning", "say", "pronounce"
     ]
-    
-    query_lower = query.lower()
     
     # Check if any of the keywords are in the query
     for keyword in portuguese_keywords:
@@ -259,16 +277,31 @@ async def detect_user_intent(user_message: str) -> Dict[str, Any]:
     intent_text = intent_response.choices[0].message.content.strip().lower()
     print(f"Intent detection: '{intent_text}' for message: '{user_message}'")
     
-    # Determine if this is a question generation request
-    is_question_intent = "question_generation" in intent_text
+    # Check for simple/short responses that might be answering a previous question
+    is_simple_response = len(user_message.strip().split()) <= 3 and intent_text == "off_topic"
+    in_conversation = False
     
-    # Extract question type if it's a question generation intent
-    question_type = None
-    if is_question_intent:
-        if ":multiple_choice" in intent_text:
-            question_type = [QuestionTypes.MULTIPLE_CHOICE]
-        else:  # Default to fill in the blanks if multiple choice not specifically requested
-            question_type = [QuestionTypes.FILL_IN_THE_BLANKS]
+    if is_simple_response:
+        # Get conversation history to check context
+        history = MongoDBConversationManager.get_conversation_history(conversation_id)
+        
+        # Check if there's previous context where the AI asked a question
+        if history and len(history) > 0:
+            # Get the most recent AI message
+            ai_messages = [msg for msg in history if msg.get("sender") == MessageSenders.AI]
+            if ai_messages:
+                last_ai_message = ai_messages[-1]
+                last_ai_content = last_ai_message.get("content", "")
+                
+                # Check if the last AI message ended with a question mark or contains common question phrases
+                question_indicators = ["?", "can you", "do you", "could you", "would you", "how about", "have you"]
+                for indicator in question_indicators:
+                    if indicator in last_ai_content.lower():
+                        print(f"Short response '{user_message}' appears to be answering AI's previous question")
+                        # Override the off-topic classification
+                        intent_text = "general_chat"
+                        in_conversation = True
+                        break
     
     # Default intent is general chat
     intent = {
@@ -339,6 +372,26 @@ async def generate_ai_response(user_message: str, conversation_id: Optional[str]
     # Get conversation context for OpenAI
     context = await get_conversation_context(conversation_id)
     
+    # Check for simple/short responses that might be answering a previous question
+    is_simple_response = len(user_message.strip().split()) <= 3 and not is_app_related_query(user_message)
+    
+    if is_simple_response and context:
+        # Check if there's previous context where the AI asked a question
+        if len(context) > 0:
+            # Get the most recent AI message
+            for i in range(len(context) - 1, -1, -1):
+                if context[i]["role"] == "assistant":
+                    last_ai_content = context[i]["content"]
+                    
+                    # Check if the last AI message ended with a question mark or contains common question phrases
+                    question_indicators = ["?", "can you", "do you", "could you", "would you", "how about", "have you"]
+                    for indicator in question_indicators:
+                        if indicator in last_ai_content.lower():
+                            print(f"Short response '{user_message}' appears to be answering AI's previous question")
+                            # Don't treat as off-topic
+                            break
+                    break
+    
     # Based on intent, generate appropriate response
     if intent.get("is_question_request", False):
         # Handle question generation
@@ -400,6 +453,13 @@ async def generate_ai_response(user_message: str, conversation_id: Optional[str]
         
         # Check if the response is app-related
         if not is_app_related_query(user_message):
+            # Define topic name for off-topic redirection
+            topic_name = "Portuguese language" # Default topic name
+            
+            # Try to extract topic from intent or context
+            if intent.get("topic"):
+                topic_name = intent.get("topic")
+            
             # Generate a contextual response redirecting to Portuguese learning
             redirect_prompt = [
                 {"role": "system", "content": f"""
@@ -902,6 +962,9 @@ async def process_message(message_data: ProcessMessage):
                 
                 They are currently learning about: {topic_name}
                 
+                IMPORTANT: Short responses like "yes", "no", "maybe", "I can't", etc. should be classified as 
+                "general_chat" as they are likely responses to previous questions in the conversation.
+                
                 Return ONLY one of these classifications without any explanation.
                 """},
             {"role": "user", "content": "Give me a quiz about Portuguese verbs"},
@@ -920,6 +983,12 @@ async def process_message(message_data: ProcessMessage):
             {"role": "assistant", "content": "question_generation:fill_in_the_blanks"},
             {"role": "user", "content": "What's the weather like today?"},
             {"role": "assistant", "content": "off_topic"},
+            {"role": "user", "content": "Yes"},
+            {"role": "assistant", "content": "general_chat"},
+            {"role": "user", "content": "No, I can't"},
+            {"role": "assistant", "content": "general_chat"},
+            {"role": "user", "content": "Maybe later"},
+            {"role": "assistant", "content": "general_chat"},
             {"role": "user", "content": user_message}
         ]
         
@@ -927,6 +996,32 @@ async def process_message(message_data: ProcessMessage):
         intent_response = await create_openai_completion(messages=intent_prompt)
         intent_text = intent_response.choices[0].message.content.strip().lower()
         print(f"Intent detection: '{intent_text}' for message: '{user_message}'")
+        
+        # Check for simple/short responses that might be answering a previous question
+        is_simple_response = len(user_message.strip().split()) <= 3 and intent_text == "off_topic"
+        in_conversation = False
+        
+        if is_simple_response:
+            # Get conversation history to check context
+            history = MongoDBConversationManager.get_conversation_history(conversation_id)
+            
+            # Check if there's previous context where the AI asked a question
+            if history and len(history) > 0:
+                # Get the most recent AI message
+                ai_messages = [msg for msg in history if msg.get("sender") == MessageSenders.AI]
+                if ai_messages:
+                    last_ai_message = ai_messages[-1]
+                    last_ai_content = last_ai_message.get("content", "")
+                    
+                    # Check if the last AI message ended with a question mark or contains common question phrases
+                    question_indicators = ["?", "can you", "do you", "could you", "would you", "how about", "have you"]
+                    for indicator in question_indicators:
+                        if indicator in last_ai_content.lower():
+                            print(f"Short response '{user_message}' appears to be answering AI's previous question")
+                            # Override the off-topic classification
+                            intent_text = "general_chat"
+                            in_conversation = True
+                            break
         
         # Check if the request is off-topic (not related to Portuguese learning)
         if intent_text == "off_topic":
@@ -1363,7 +1458,8 @@ async def process_message(message_data: ProcessMessage):
             history = MongoDBConversationManager.get_conversation_history(conversation_id)
             print(f"Got history with {len(history)} messages")
             
-            for msg in history[-5:]:  # Use last 5 messages for context
+            # Use all messages for context instead of limiting to last 5
+            for msg in history:
                 if msg.get("sender") == MessageSenders.USER:
                     context_messages.append({"role": "user", "content": msg.get("content", "")})
                 else:
