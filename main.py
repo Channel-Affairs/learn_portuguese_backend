@@ -1747,7 +1747,7 @@ async def fetch_prompt_from_cms(topic_ids: str):
         import aiohttp
         import json
 
-        cms_base_url = os.getenv("CMS_BASE_URL", "http://localhost:3000")
+        cms_base_url = os.getenv("CMS_BASE_URL", "http://localhost:3000/api")
         async with aiohttp.ClientSession() as session:
             async with session.get(f"{cms_base_url}/get-prompt", params={"topicIds": topic_ids}) as response:
                 if response.status == 200:
