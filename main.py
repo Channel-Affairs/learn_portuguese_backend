@@ -248,6 +248,93 @@ async def get_conversation_context(conversation_id: Optional[str]) -> List[Dict[
             })
     
     return context
+# Updated get_current_user to use the security scheme
+async def get_current_user(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials = Depends(security_scheme),
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Authenticate and return the current user based on the JWT token.
+    Now accepts tokens from both the HTTPBearer security scheme and Header.
+    """
+    # Debug all request headers
+    print("All headers:")
+    for key, value in request.headers.items():
+        print(f"  {key}: {value}")
+    
+    # Try to get token from security scheme first (Swagger UI's Authorization)
+    token = None
+    if credentials and credentials.credentials:
+        print(f"Token found in security scheme: {credentials.credentials[:10]}...")
+        token = credentials.credentials
+    # Otherwise try the Authorization header
+    elif authorization:
+        print(f"Authorization header found: {authorization}")
+        try:
+            scheme, token_value = authorization.split()
+            if scheme.lower() != "bearer":
+                raise HTTPException(status_code=401, detail="Invalid authentication scheme, must be Bearer")
+            token = token_value
+        except ValueError:
+            raise HTTPException(status_code=401, detail="Invalid authorization header format")
+    else:
+        # Check for token in query parameters as fallback
+        token_param = request.query_params.get("token")
+        if token_param:
+            print(f"Token found in query parameter: {token_param[:10]}...")
+            token = token_param
+    
+    # If still no token, check for cookie
+    if not token:
+        access_token = request.cookies.get("access_token")
+        if access_token:
+            print(f"Token found in cookie: {access_token[:10]}...")
+            token = access_token
+    
+    if not token:
+        raise HTTPException(
+            status_code=401, 
+            detail="Not authenticated. Please provide a valid Bearer token in Authorization header."
+        )
+    
+    try:
+        print(f"Token: {token}")
+        # Decode JWT token
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        user_id = payload.get("user_id")
+        print(f"User ID: {user_id}")
+        if user_id is None:
+            raise HTTPException(status_code=401, detail="Invalid token: missing user_id")
+        
+        # Get user from database
+        from database import db
+        # Try to find user by string ID first
+        user = db.app_users.find_one({"_id": user_id})
+        
+        # If not found, try other possible formats
+        if user is None:
+            # Try to find by string representation of ID
+            try:
+                from bson import ObjectId
+                # Check if the user_id is a valid ObjectId
+                if ObjectId.is_valid(user_id):
+                    user = db.app_users.find_one({"_id": ObjectId(user_id)})
+            except Exception as e:
+                print(f"Error converting to ObjectId: {str(e)}")
+        
+        if user is None:
+            raise HTTPException(status_code=404, detail=f"User not found with ID: {user_id}")
+            
+        return user
+    except JWTError as e:
+        raise HTTPException(status_code=401, detail=f"Invalid token: {str(e)}")
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        print(f"Authentication error: {str(e)}\n{error_details}")
+        raise HTTPException(status_code=401, detail=f"Authentication error: {str(e)}")
+
 
 # Function to detect user intent
 async def detect_user_intent(user_message: str) -> Dict[str, Any]:
@@ -914,7 +1001,7 @@ async def get_or_create_conversation(conversation_data: GetOrCreateConversation)
 @app.post("/api/process-message", 
           summary="Process user message with topic context", 
           description="Process user message maintaining topic context and detecting intent for questions or general chat")
-async def process_message(message_data: ProcessMessage):
+async def process_message(message_data: ProcessMessage, user=Depends(get_current_user)):
     try:
         # Extract data from request
         conversation_id = message_data.conversation_id
@@ -925,7 +1012,13 @@ async def process_message(message_data: ProcessMessage):
         # Default topic name if CMS fetch fails
         topic_name = "Portuguese language"
         
-        print(f"Process message request: conversation_id={conversation_id}, message='{user_message}', topic_ids='{topic_ids}'")
+        # Get user's preferred language from settings
+        from database import db
+        user_id = str(user["_id"])
+        user_settings = db.user_settings.find_one({"user_id": user_id})
+        preferred_language = user_settings.get("preferred_language", "Portuguese") if user_settings else "Portuguese"
+        
+        print(f"Process message request: conversation_id={conversation_id}, message='{user_message}', topic_ids='{topic_ids}', preferred_language='{preferred_language}'")
         
         
         try:
@@ -1142,7 +1235,7 @@ async def process_message(message_data: ProcessMessage):
                 
                 # Add cms_prompt to the question generation context if available
                 if cms_prompt:
-                    # Configure the question generator with the custom prompt
+                    # Configure the question generator with the custom prompt and preferred language
                     question_generator.configure_custom_prompt(
                         f"You are generating questions about {question_topic}. {cms_prompt}"
                     )
@@ -1661,92 +1754,6 @@ async def login(user_data: UserLogin):
             detail=f"Login error: {str(e)}"
         )
 
-# Updated get_current_user to use the security scheme
-async def get_current_user(
-    request: Request,
-    credentials: HTTPAuthorizationCredentials = Depends(security_scheme),
-    authorization: Optional[str] = Header(None)
-):
-    """
-    Authenticate and return the current user based on the JWT token.
-    Now accepts tokens from both the HTTPBearer security scheme and Header.
-    """
-    # Debug all request headers
-    print("All headers:")
-    for key, value in request.headers.items():
-        print(f"  {key}: {value}")
-    
-    # Try to get token from security scheme first (Swagger UI's Authorization)
-    token = None
-    if credentials and credentials.credentials:
-        print(f"Token found in security scheme: {credentials.credentials[:10]}...")
-        token = credentials.credentials
-    # Otherwise try the Authorization header
-    elif authorization:
-        print(f"Authorization header found: {authorization}")
-        try:
-            scheme, token_value = authorization.split()
-            if scheme.lower() != "bearer":
-                raise HTTPException(status_code=401, detail="Invalid authentication scheme, must be Bearer")
-            token = token_value
-        except ValueError:
-            raise HTTPException(status_code=401, detail="Invalid authorization header format")
-    else:
-        # Check for token in query parameters as fallback
-        token_param = request.query_params.get("token")
-        if token_param:
-            print(f"Token found in query parameter: {token_param[:10]}...")
-            token = token_param
-    
-    # If still no token, check for cookie
-    if not token:
-        access_token = request.cookies.get("access_token")
-        if access_token:
-            print(f"Token found in cookie: {access_token[:10]}...")
-            token = access_token
-    
-    if not token:
-        raise HTTPException(
-            status_code=401, 
-            detail="Not authenticated. Please provide a valid Bearer token in Authorization header."
-        )
-    
-    try:
-        print(f"Token: {token}")
-        # Decode JWT token
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        user_id = payload.get("user_id")
-        print(f"User ID: {user_id}")
-        if user_id is None:
-            raise HTTPException(status_code=401, detail="Invalid token: missing user_id")
-        
-        # Get user from database
-        from database import db
-        # Try to find user by string ID first
-        user = db.app_users.find_one({"_id": user_id})
-        
-        # If not found, try other possible formats
-        if user is None:
-            # Try to find by string representation of ID
-            try:
-                from bson import ObjectId
-                # Check if the user_id is a valid ObjectId
-                if ObjectId.is_valid(user_id):
-                    user = db.app_users.find_one({"_id": ObjectId(user_id)})
-            except Exception as e:
-                print(f"Error converting to ObjectId: {str(e)}")
-        
-        if user is None:
-            raise HTTPException(status_code=404, detail=f"User not found with ID: {user_id}")
-            
-        return user
-    except JWTError as e:
-        raise HTTPException(status_code=401, detail=f"Invalid token: {str(e)}")
-    except Exception as e:
-        import traceback
-        error_details = traceback.format_exc()
-        print(f"Authentication error: {str(e)}\n{error_details}")
-        raise HTTPException(status_code=401, detail=f"Authentication error: {str(e)}")
 
 # User settings endpoints
 @app.get("/api/user/settings", summary="Get user settings")
