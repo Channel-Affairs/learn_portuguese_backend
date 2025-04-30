@@ -3,29 +3,30 @@ from fastapi.middleware.cors import CORSMiddleware
 from typing import Dict, Any, List, Optional
 import os
 from dotenv import load_dotenv
-import openai
 import json
 import uuid
 from datetime import datetime, timedelta
 from passlib.context import CryptContext
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel
 from jose import JWTError, jwt
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials, OAuth2PasswordBearer
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 # Import models and question generator
 from models import (
     MessageSenders, ResponseType, QuestionTypes, DifficultyLevel,
-    TextResponse, BaseQuestion, MultipleChoiceQuestion, FillInTheBlankQuestion,
+    TextResponse, MultipleChoiceQuestion, FillInTheBlankQuestion,
     QuestionResponse, AIChatResponse, UserChatRequest, QuestionRequest,
     UserAnswer, AnswerEvaluation, UserAnswerResponse, 
     ConversationCreate, ConversationResponse,
     ConversationListResponse, Message, ConversationHistoryResponse,
-    GetOrCreateConversation, ProcessMessage, ProcessMessageResponse,
-    UserCreate, AppUser, UserSettings, UserSettingsCreate, UserSettingsUpdate
+    GetOrCreateConversation, ProcessMessage, UserSettings, UserSettingsCreate, UserSettingsUpdate
 )
 from question_generator import QuestionGenerator
 # Use MongoDB conversation manager
-from database import MongoDBConversationManager, MongoJSONEncoder, initialize_db
+from database import MongoDBConversationManager, initialize_db
+
+# Import auth router
+from routers.auth import router as auth_router
 
 # Load environment variables
 load_dotenv()
@@ -115,6 +116,9 @@ app = FastAPI(
     description="API for the Portagees language learning chat application",
     version="1.0.0"
 )
+
+# Include the auth router
+app.include_router(auth_router)
 
 # Configure security scheme for Swagger UI
 security_scheme = HTTPBearer(
@@ -1625,24 +1629,6 @@ SECRET_KEY = os.getenv("SECRET_KEY", "09d25e094faa6ca2556c818166b7a9563b93f7099f
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24 hours
 
-# User signup schema
-class UserSignup(BaseModel):
-    email: EmailStr
-    username: str
-    password: str
-    first_name: Optional[str] = None
-    last_name: Optional[str] = None
-
-# User signup response
-class UserSignupResponse(BaseModel):
-    message: str
-    user_id: str
-
-# Login schema
-class UserLogin(BaseModel):
-    email: EmailStr
-    password: str
-
 # Token schema
 class Token(BaseModel):
     access_token: str
@@ -1661,103 +1647,6 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
-# User signup endpoint
-@app.post("/api/signup", response_model=UserSignupResponse)
-async def signup(user_data: UserSignup):
-    """Register a new user"""
-    # Get database connection
-    from database import db
-    
-    # Check if email already exists
-    existing_user = db.app_users.find_one({"email": user_data.email})
-    if existing_user:
-        raise HTTPException(status_code=400, detail="Email already registered")
-    
-    # Check if username already exists
-    existing_username = db.app_users.find_one({"username": user_data.username})
-    if existing_username:
-        raise HTTPException(status_code=400, detail="Username already taken")
-
-    try:
-        # Hash the password
-        hashed_password = pwd_context.hash(user_data.password)
-        
-        # Generate a user ID
-        user_id = str(uuid.uuid4())
-        
-        # Create user object
-        new_user = AppUser(
-            _id=user_id,
-            email=user_data.email,
-            username=user_data.username,
-            first_name=user_data.first_name or "",
-            last_name=user_data.last_name or "",
-            hashed_password=hashed_password,
-            is_active=True,
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow()
-        )
-        
-        # Save user to database using the AppUser model
-        user_dict = new_user.dict()
-        result = db.app_users.insert_one(user_dict)
-        
-        # Return success response with the user ID
-        return UserSignupResponse(
-            message="User successfully created",
-            user_id=user_id
-        )
-        
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error creating user: {str(e)}"
-        )
-
-# Login endpoint
-@app.post("/api/login", response_model=Token)
-async def login(user_data: UserLogin):
-    """Authenticate a user and return a JWT token"""
-    try:
-        # Get database connection
-        from database import db
-        
-        # Find user by email in app_users collection
-        user = db.app_users.find_one({"email": user_data.email})
-        if not user:
-            raise HTTPException(status_code=401, detail="Invalid email or password")
-        
-        # Verify password
-        if not pwd_context.verify(user_data.password, user["hashed_password"]):
-            raise HTTPException(status_code=401, detail="Invalid email or password")
-        
-        # Create access token - ensure all data is JSON serializable
-        user_id = str(user["_id"])  # Convert ObjectId to string if needed
-        
-        token_data = {
-            "sub": user["email"],
-            "user_id": user_id
-        }
-        token = create_access_token(token_data)
-        
-        # Return token with user profile data
-        return Token(
-            access_token=token,
-            token_type="bearer",
-            user_id=user_id,
-            email=user["email"],
-            username=user["username"],
-            first_name=user["first_name"],
-            last_name=user["last_name"]
-        )
-        
-    except Exception as e:
-        import traceback
-        print(traceback.format_exc())
-        raise HTTPException(
-            status_code=500,
-            detail=f"Login error: {str(e)}"
-        )
 
 
 # User settings endpoints
