@@ -13,6 +13,7 @@ from models import (
 from question_generator import QuestionGenerator
 from database import MongoDBConversationManager
 from dependencies import create_openai_completion, get_current_user, fetch_prompt_from_cms
+from routers.prompts import ChatPrompts  # Import the centralized prompts
 
 # Initialize router
 router = APIRouter(
@@ -63,55 +64,22 @@ async def process_message(message_data: ProcessMessage, user=Depends(get_current
                 
             if not cms_prompt:
                 print("Warning: No prompt received from CMS, using default system prompt")
-                cms_prompt = """You are an AI assistant for Portuguese language learning. 
-                Only respond to queries related to the Portuguese language, Portugal, or Portuguese culture."""
+                cms_prompt = ChatPrompts.default_system_prompt()
         except Exception as e:
             print(f"Error getting prompt from CMS: {str(e)}")
             # Fallback to default prompt if CMS call fails
-            cms_prompt = """You are an AI assistant for Portuguese language learning. 
-            Only respond to queries related to the Portuguese language, Portugal, or Portuguese culture."""
+            cms_prompt = ChatPrompts.default_system_prompt()
 
         # Use topic_name for intent detection
         intent_prompt = [
-            {"role": "system", "content": f"""
-                You are a classifier for a Portuguese language learning app.
-                Classify if the user message is asking for:
-                - question_generation:multiple_choice - they want multiple choice questions about Portuguese
-                - question_generation:fill_in_the_blanks - they want fill-in-the-blank exercises for Portuguese
-                - general_chat - they want to generally talk about Portuguese language or related topics
-                - off_topic - they're asking about something not related to Portuguese
-                
-                They are currently learning about: {topic_name}
-                
-                IMPORTANT: Short responses like "yes", "no", "maybe", "I can't", etc. should be classified as 
-                "general_chat" as they are likely responses to previous questions in the conversation.
-                
-                Return ONLY one of these classifications without any explanation.
-                """},
-            {"role": "user", "content": "Give me a quiz about Portuguese verbs"},
-            {"role": "assistant", "content": "question_generation:multiple_choice"},
-            {"role": "user", "content": "How do you say 'hello' in Portuguese?"},
-            {"role": "assistant", "content": "general_chat"},
-            {"role": "user", "content": "Can you explain the most common Portuguese verbs?"},
-            {"role": "assistant", "content": "general_chat"},
-            {"role": "user", "content": "I need multiple choice questions for Portuguese vocabulary"},
-            {"role": "assistant", "content": "question_generation:multiple_choice"},
-            {"role": "user", "content": "What are the most used nouns in Portuguese?"},
-            {"role": "assistant", "content": "general_chat"},
-            {"role": "user", "content": "Test my knowledge of Portuguese grammar with fill in the blank questions"},
-            {"role": "assistant", "content": "question_generation:fill_in_the_blanks"},
-            {"role": "user", "content": "I want to practice Portuguese through a quiz"},
-            {"role": "assistant", "content": "question_generation:fill_in_the_blanks"},
-            {"role": "user", "content": "What's the weather like today?"},
-            {"role": "assistant", "content": "off_topic"},
-            {"role": "user", "content": "Yes"},
-            {"role": "assistant", "content": "general_chat"},
-            {"role": "user", "content": "No, I can't"},
-            {"role": "assistant", "content": "general_chat"},
-            {"role": "user", "content": "Maybe later"},
-            {"role": "assistant", "content": "general_chat"},
-            {"role": "user", "content": user_message}
+            {"role": "system", "content": ChatPrompts.intent_classification_prompt(topic_name)}
         ]
+        
+        # Add intent classification examples
+        intent_prompt.extend(ChatPrompts.intent_classification_examples())
+        
+        # Add current user message
+        intent_prompt.append({"role": "user", "content": user_message})
         
         # Get intent classification from OpenAI
         intent_response = await create_openai_completion(messages=intent_prompt)
@@ -160,18 +128,7 @@ async def process_message(message_data: ProcessMessage, user=Depends(get_current
             # Generate a contextual response redirecting to Portuguese learning
             # using OpenAI instead of hardcoded response
             redirect_prompt = [
-                {"role": "system", "content": f"""
-                You are a Portuguese language learning assistant. The user has asked something off-topic.
-                
-                Generate a friendly, conversational response that:
-                1. Briefly acknowledges their off-topic question in a warm, friendly way
-                2. Gently redirects them back to learning Portuguese
-                3. Specifically mentions their current topic: '{topic_name}'
-                4. Offers a specific suggestion, example, or question about '{topic_name}' to re-engage them
-                5. Format your response in HTML for readability using simple <p>, <strong> tags
-                
-                Keep your response friendly, helpful and concise (max 3 sentences).
-                """},
+                {"role": "system", "content": ChatPrompts.off_topic_redirect_prompt(topic_name)},
                 {"role": "user", "content": user_message}
             ]
             
@@ -225,22 +182,14 @@ async def process_message(message_data: ProcessMessage, user=Depends(get_current
                 
                 # Try to extract a more specific topic from the user message
                 topic_extraction_prompt = [
-                    {"role": "system", "content": f"""
-                    Extract the specific topic the user wants questions about from their message. 
-                    Pay special attention to any Portuguese grammar concepts, vocabulary categories, or language features mentioned.
-                    The user is currently studying: {topic_name}
-                    Return ONLY the topic, no extra text or explanation.
-                    """},
-                    {"role": "user", "content": "Give me questions about Portuguese verb conjugation"},
-                    {"role": "assistant", "content": "Portuguese verb conjugation"},
-                    {"role": "user", "content": "I want to practice Portuguese greetings"},
-                    {"role": "assistant", "content": "Portuguese greetings"},
-                    {"role": "user", "content": "Test me on days of the week in Portuguese"},
-                    {"role": "assistant", "content": "Days of the week in Portuguese"},
-                    {"role": "user", "content": "Can I have 5 fill in the blank questions about Portuguese prepositions?"},
-                    {"role": "assistant", "content": "Portuguese prepositions"},
-                    {"role": "user", "content": user_message}
+                    {"role": "system", "content": ChatPrompts.topic_extraction_prompt(topic_name)}
                 ]
+                
+                # Add topic extraction examples
+                topic_extraction_prompt.extend(ChatPrompts.topic_extraction_examples())
+                
+                # Add current user message
+                topic_extraction_prompt.append({"role": "user", "content": user_message})
                 
                 # Get the specific topic from the user message
                 topic_response = await create_openai_completion(messages=topic_extraction_prompt)
@@ -265,7 +214,7 @@ async def process_message(message_data: ProcessMessage, user=Depends(get_current
                 if cms_prompt:
                     # Configure the question generator with the custom prompt and preferred language
                     question_generator.configure_custom_prompt(
-                        f"You are generating questions about {question_topic}. {cms_prompt}"
+                        ChatPrompts.question_generation_prompt(question_topic, cms_prompt)
                     )
                     print("Using custom CMS prompt for question generation")
                 
@@ -556,19 +505,7 @@ async def process_message(message_data: ProcessMessage, user=Depends(get_current
             print(f"Processing general chat for topic: {topic_name}")
             
             # Create context with topic to maintain the conversation focus and incorporate CMS prompt
-            system_prompt = f"""
-            You are a Portuguese language assistant. The user is studying about '{topic_name}'. 
-            {cms_prompt}
-            
-            Keep your responses focused on this '{topic_name}' when relevant. 
-            Format your response in HTML for readability, using:
-            - <p> tags for paragraphs
-            - <ul> and <li> for bullet points when listing items or examples
-            - <strong> for emphasis on key terms
-            - Avoid using scripts or potentially unsafe HTML
-            Ensure the response is clear, concise, and broken into logical sections.
-            Return the response wrapped in a single <div> tag.
-            """
+            system_prompt = ChatPrompts.general_chat_prompt(topic_name, cms_prompt)
 
             # Create context with topic and history
             context_messages = [
