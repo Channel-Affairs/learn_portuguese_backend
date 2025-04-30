@@ -4,10 +4,10 @@ import uuid
 from datetime import datetime
 
 # Import models and dependencies
-from ..models import (
+from models import (
     UserSettings, UserSettingsCreate, UserSettingsUpdate
 )
-from ..dependencies import get_current_user
+from dependencies import get_current_user
 
 # Initialize router
 router = APIRouter(
@@ -21,7 +21,7 @@ router = APIRouter(
 async def get_user_settings(user=Depends(get_current_user)):
     """Get settings for the current user"""
     try:
-        from ..database import db
+        from database import db
         user_id = str(user["_id"])
         print(f"Getting settings for user ID: {user_id}")
         
@@ -53,7 +53,7 @@ async def get_user_settings(user=Depends(get_current_user)):
 async def create_user_settings(settings_data: UserSettingsCreate, user=Depends(get_current_user)):
     """Create settings for the current user"""
     try:
-        from ..database import db
+        from database import db
         user_id = str(user["_id"])
         print(f"Creating settings for user ID: {user_id}")
         
@@ -93,7 +93,7 @@ async def create_user_settings(settings_data: UserSettingsCreate, user=Depends(g
 async def update_user_settings(settings_data: UserSettingsUpdate, user=Depends(get_current_user)):
     """Update settings for the current user"""
     try:
-        from ..database import db
+        from database import db
         user_id = str(user["_id"])
         print(f"Updating settings for user ID: {user_id}")
         
@@ -166,4 +166,4 @@ async def update_user_settings(settings_data: UserSettingsUpdate, user=Depends(g
         import traceback
         error_details = traceback.format_exc()
         print(f"Error updating user settings: {str(e)}\n{error_details}")
-        raise HTTPException(status_code=500, detail=f"Error updating user settings: {str(e)}") 
+        raise HTTPException(status_code=500, detail=f"Error updating user settings: {str(e)}")

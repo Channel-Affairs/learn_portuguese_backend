@@ -15,9 +15,8 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from models import (
     MessageSenders, ResponseType, QuestionTypes, DifficultyLevel,
     TextResponse, MultipleChoiceQuestion, FillInTheBlankQuestion,
-    QuestionResponse, AIChatResponse, UserChatRequest, QuestionRequest,
-    UserAnswer, AnswerEvaluation, UserAnswerResponse, 
-   ProcessMessage, UserSettings, UserSettingsCreate, UserSettingsUpdate
+    QuestionResponse, AIChatResponse, UserChatRequest,
+   ProcessMessage
 )
 from question_generator import QuestionGenerator
 # Use MongoDB conversation manager
@@ -26,6 +25,9 @@ from database import MongoDBConversationManager, initialize_db
 # Import auth router
 from routers.auth import router as auth_router
 from routers.conversations import router as conversations_router
+from routers.user import router as user_router
+
+from dependencies import create_openai_completion
 # Load environment variables
 load_dotenv()
 
@@ -41,73 +43,6 @@ openai_api_key = os.getenv("OPENAI_API_KEY")
 if not openai_api_key:
     print("WARNING: OpenAI API key not found in environment variables. API calls will fail.")
 
-# Create a safe OpenAI client function with proper error handling
-async def create_openai_completion(messages, model="gpt-3.5-turbo"):
-    """Helper function to create OpenAI chat completions without proxy issues"""
-    try:
-        # Use direct HTTP requests instead of the OpenAI client
-        import aiohttp
-        import json
-        
-        api_key = os.getenv("OPENAI_API_KEY")
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}"
-        }
-        
-        payload = {
-            "model": model,
-            "messages": messages
-        }
-        
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                "https://api.openai.com/v1/chat/completions",
-                headers=headers,
-                json=payload
-            ) as response:
-                result = await response.json()
-                
-                # Create response object that mimics the OpenAI client response
-                if "choices" in result and len(result["choices"]) > 0:
-                    content = result["choices"][0]["message"]["content"]
-                    
-                    # Create a dummy message object
-                    class Message:
-                        def __init__(self, content):
-                            self.content = content
-                    
-                    # Create a dummy choice object
-                    class Choice:
-                        def __init__(self, message):
-                            self.message = message
-                    
-                    # Create a dummy response object
-                    class Response:
-                        def __init__(self, choices):
-                            self.choices = choices
-                    
-                    # Create and return the response
-                    message = Message(content)
-                    choice = Choice(message)
-                    return Response([choice])
-                else:
-                    raise Exception(f"Unexpected response format: {result}")
-    except Exception as e:
-        print(f"OpenAI API error: {str(e)}")
-        # Return a dummy response object for graceful fallback
-        class DummyChoice:
-            def __init__(self):
-                self.message = type('obj', (object,), {
-                    'content': f"I couldn't process your request due to a technical issue: {str(e)[:100]}..."
-                })
-        
-        class DummyResponse:
-            def __init__(self):
-                self.choices = [DummyChoice()]
-        
-        return DummyResponse()
-
 # Initialize FastAPI app
 app = FastAPI(
     title="Portagees Chat API", 
@@ -118,6 +53,7 @@ app = FastAPI(
 # Include the auth router
 app.include_router(auth_router)
 app.include_router(conversations_router)
+app.include_router(user_router)
 
 # Configure security scheme for Swagger UI
 security_scheme = HTTPBearer(
@@ -601,122 +537,6 @@ async def generate_ai_response(user_message: str, conversation_id: Optional[str]
         )
         
         return response
-
-# Function to evaluate user answers
-async def evaluate_answer(user_answer: UserAnswer) -> UserAnswerResponse:
-    """Evaluate a user's answer to a question"""
-    conversation_id = user_answer.conversation_id
-    question_id = user_answer.question_id
-    answer = user_answer.answer
-    question_text = user_answer.question_text
-    
-    # If we don't have the question_text, we need to find it in the conversation history
-    if not question_text:
-        # Get conversation history
-        messages = MongoDBConversationManager.get_conversation_history(conversation_id)
-        
-        # Find the question with the matching ID
-        for msg in messages:
-            if msg.get("sender") == MessageSenders.AI and msg.get("type") == ResponseType.QUESTION:
-                payload = msg.get("payload", {})
-                if isinstance(payload, dict) and "questions" in payload:
-                    for question in payload["questions"]:
-                        if question.get("id") == question_id:
-                            question_text = question.get("questionText", "")
-                            break
-    
-    # If we still don't have the question_text, return an error
-    if not question_text:
-        raise HTTPException(status_code=400, detail="Question not found in conversation history")
-    
-    # Get conversation context for OpenAI
-    context = await get_conversation_context(conversation_id)
-    
-    # Format the answer for evaluation
-    user_answer_str = answer if isinstance(answer, str) else ", ".join(answer)
-    
-    # Create evaluation message
-    eval_message = [
-        {"role": "system", "content": "You are a Portuguese language teacher evaluating a student's answer to a question."},
-        {"role": "user", "content": f"Question: {question_text}\nStudent's answer: {user_answer_str}\nEvaluate if this answer is correct. Provide explanation and any corrections needed. Return your response as a JSON object with the following structure: {{\"is_correct\": boolean, \"correct_answer\": \"string or array of strings with correct answer\", \"explanation\": \"detailed explanation string\", \"follow_up_hint\": \"optional hint for next steps\" }}"}
-    ]
-    
-    # Generate evaluation from OpenAI
-    response = await create_openai_completion(eval_message)
-    
-    # Parse the JSON response
-    try:
-        evaluation_text = response.choices[0].message.content
-        
-        # Extract JSON object from the response
-        # Sometimes the model returns markdown with json inside
-        if "```json" in evaluation_text:
-            json_part = evaluation_text.split("```json")[1].split("```")[0].strip()
-            evaluation_data = json.loads(json_part)
-        elif "```" in evaluation_text:
-            json_part = evaluation_text.split("```")[1].strip()
-            evaluation_data = json.loads(json_part)
-        else:
-            evaluation_data = json.loads(evaluation_text)
-        
-        # Create evaluation object
-        evaluation = AnswerEvaluation(
-            is_correct=evaluation_data.get("is_correct", False),
-            correct_answer=evaluation_data.get("correct_answer", ""),
-            explanation=evaluation_data.get("explanation", ""),
-            follow_up_hint=evaluation_data.get("follow_up_hint", None)
-        )
-        
-        # Record answer result
-        difficulty = "medium"  # Default difficulty
-        MongoDBConversationManager.record_answer_result(
-            conversation_id=conversation_id,
-            question_id=question_id,
-            was_correct=evaluation.is_correct,
-            user_answer=user_answer_str,
-            difficulty=difficulty
-        )
-        
-        # Get conversation state to check current difficulty
-        state = MongoDBConversationManager.get_state(conversation_id)
-        current_difficulty = state.get("difficulty_level", "medium") if state else "medium"
-        
-        # Prepare response
-        response = UserAnswerResponse(
-            question_id=question_id,
-            evaluation=evaluation,
-            next_question=None  # We don't automatically generate next question
-        )
-        
-        # Add evaluation to conversation history
-        ai_msg = {
-            "sender": MessageSenders.AI,
-            "content": "Here's my evaluation of your answer:",
-            "payload": {"text": evaluation.explanation},
-            "type": ResponseType.FEEDBACK,
-            "id": get_next_message_id(),
-            "timestamp": datetime.now().isoformat()
-        }
-        MongoDBConversationManager.add_message(conversation_id, ai_msg)
-        
-        return response
-        
-    except Exception as e:
-        print(f"Error evaluating answer: {str(e)}")
-        
-        # Fallback evaluation
-        evaluation = AnswerEvaluation(
-            is_correct=False,
-            correct_answer="Could not determine",
-            explanation=f"Sorry, I couldn't properly evaluate your answer due to a technical issue. Please try again."
-        )
-        
-        return UserAnswerResponse(
-            question_id=question_id,
-            evaluation=evaluation,
-            next_question=None
-        )
-
 # Root endpoint
 @app.get("/")
 async def root():
@@ -731,67 +551,6 @@ async def chat(user_request: UserChatRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error generating response: {str(e)}")
 
-# Generate questions endpoint
-@app.post("/api/generate-questions", response_model=AIChatResponse)
-async def generate_questions(request: QuestionRequest):
-    """Generate Portuguese language questions"""
-    try:
-        # Get conversation state if conversation_id is provided
-        difficulty = request.difficulty
-        if not difficulty and request.conversation_id:
-            conversation_state = MongoDBConversationManager.get_state(request.conversation_id)
-            if conversation_state:
-                difficulty = conversation_state.get("difficulty_level", "medium")
-        
-        # Default to medium if not specified
-        if not difficulty:
-            difficulty = "medium"
-        
-        # Generate questions
-        questions = question_generator.generate_questions(
-            topic=request.topic,
-            num_questions=request.num_questions,
-            difficulty=difficulty,
-            question_types=request.question_types
-        )
-        
-        # Create response
-        content = f"Here are {request.num_questions} Portuguese language questions on {request.topic}:"
-        response = AIChatResponse(
-            id=get_next_message_id(),
-            type=ResponseType.QUESTION,
-            content=content,
-            payload=QuestionResponse(questions=questions)
-        )
-        
-        # If conversation_id is provided, save response to conversation history
-        if request.conversation_id:
-            MongoDBConversationManager.add_message(
-                conversation_id=request.conversation_id,
-                message={
-                    "sender": MessageSenders.AI,
-                    "content": content,
-                    "timestamp": datetime.now().isoformat(),
-                    "id": response.id,
-                    "type": ResponseType.QUESTION,
-                    "payload": {
-                        "questions": [q.dict() for q in questions]
-                    }
-                }
-            )
-        
-        return response
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error generating questions: {str(e)}")
-
-# Evaluate answer endpoint
-@app.post("/api/evaluate-answer", response_model=UserAnswerResponse)
-async def evaluate_user_answer(user_answer: UserAnswer):
-    """Evaluate user's answer to a question"""
-    try:
-        return await evaluate_answer(user_answer)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error evaluating answer: {str(e)}")
 # Health check endpoint
 @app.get("/api/health")
 async def health_check():
@@ -1479,160 +1238,6 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
-
-
-
-# User settings endpoints
-@app.get("/api/user/settings", summary="Get user settings")
-async def get_user_settings(user=Depends(get_current_user)):
-    """Get settings for the current user"""
-    try:
-        from database import db
-        user_id = str(user["_id"])
-        print(f"Getting settings for user ID: {user_id}")
-        
-        # Find user settings
-        settings = db.user_settings.find_one({"user_id": user_id})
-        
-        if not settings:
-            print(f"No settings found for user ID: {user_id}, returning defaults")
-            # Return default settings if none exist
-            return UserSettings(
-                user_id=user_id,
-                preferred_language="Portuguese",
-                notification_enabled=True
-            )
-        
-        # Convert MongoDB ObjectId to string
-        if "_id" in settings:
-            settings["_id"] = str(settings["_id"])
-            
-        return settings
-        
-    except Exception as e:
-        import traceback
-        error_details = traceback.format_exc()
-        print(f"Error retrieving user settings: {str(e)}\n{error_details}")
-        raise HTTPException(status_code=500, detail=f"Error retrieving user settings: {str(e)}")
-
-@app.post("/api/user/settings", summary="Create user settings")
-async def create_user_settings(settings_data: UserSettingsCreate, user=Depends(get_current_user)):
-    """Create settings for the current user"""
-    try:
-        from database import db
-        user_id = str(user["_id"])
-        print(f"Creating settings for user ID: {user_id}")
-        
-        # Check if settings already exist
-        existing_settings = db.user_settings.find_one({"user_id": user_id})
-        if existing_settings:
-            raise HTTPException(status_code=400, detail="Settings already exist for this user. Use PUT to update.")
-        
-        # Create new settings
-        new_settings = UserSettings(
-            _id=str(uuid.uuid4()),
-            user_id=user_id,
-            preferred_language=settings_data.preferred_language,
-            notification_enabled=settings_data.notification_enabled,
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow()
-        )
-        
-        # Insert into database
-        settings_dict = new_settings.dict()
-        print(f"Inserting new settings: {settings_dict}")
-        result = db.user_settings.insert_one(settings_dict)
-        print(f"Insert result: {result.inserted_id}")
-        
-        return new_settings
-        
-    except HTTPException as e:
-        # Re-raise HTTP exceptions as-is
-        raise e
-    except Exception as e:
-        import traceback
-        error_details = traceback.format_exc()
-        print(f"Error creating user settings: {str(e)}\n{error_details}")
-        raise HTTPException(status_code=500, detail=f"Error creating user settings: {str(e)}")
-
-@app.put("/api/user/settings", summary="Update user settings")
-async def update_user_settings(settings_data: UserSettingsUpdate, user=Depends(get_current_user)):
-    """Update settings for the current user"""
-    try:
-        from database import db
-        user_id = str(user["_id"])
-        print(f"Updating settings for user ID: {user_id}")
-        
-        # Find existing settings
-        existing_settings = db.user_settings.find_one({"user_id": user_id})
-        print(f"Existing settings found: {existing_settings is not None}")
-        
-        if not existing_settings:
-            # Create new settings if none exist
-            settings_id = str(uuid.uuid4())
-            new_settings = UserSettings(
-                _id=settings_id,
-                user_id=user_id,
-                preferred_language=settings_data.preferred_language or "Portuguese",
-                notification_enabled=settings_data.notification_enabled if settings_data.notification_enabled is not None else True,
-                created_at=datetime.utcnow(),
-                updated_at=datetime.utcnow()
-            )
-            
-            settings_dict = new_settings.dict()
-            print(f"Creating new settings during update: {settings_dict}")
-            result = db.user_settings.insert_one(settings_dict)
-            print(f"Insert result: {result.inserted_id}")
-            
-            # Get the newly created settings
-            updated_settings = db.user_settings.find_one({"_id": settings_id})
-            if updated_settings is None:
-                print(f"Warning: Could not find newly created settings with ID {settings_id}")
-                # Return the model we just created as fallback
-                return new_settings
-                
-            if "_id" in updated_settings:
-                updated_settings["_id"] = str(updated_settings["_id"])
-                
-            return updated_settings
-        
-        # Prepare update data
-        update_data = {}
-        if settings_data.preferred_language is not None:
-            update_data["preferred_language"] = settings_data.preferred_language
-        if settings_data.notification_enabled is not None:
-            update_data["notification_enabled"] = settings_data.notification_enabled
-        
-        # Add updated timestamp
-        update_data["updated_at"] = datetime.utcnow()
-        
-        print(f"Updating settings with data: {update_data}")
-        
-        # Update settings
-        update_result = db.user_settings.update_one(
-            {"user_id": user_id},
-            {"$set": update_data}
-        )
-        print(f"Update result: matched={update_result.matched_count}, modified={update_result.modified_count}")
-        
-        # Get updated settings
-        updated_settings = db.user_settings.find_one({"user_id": user_id})
-        if updated_settings is None:
-            raise HTTPException(status_code=404, detail="Settings not found after update")
-            
-        if "_id" in updated_settings:
-            updated_settings["_id"] = str(updated_settings["_id"])
-            
-        return updated_settings
-        
-    except HTTPException as e:
-        # Re-raise HTTP exceptions as-is
-        raise e
-    except Exception as e:
-        import traceback
-        error_details = traceback.format_exc()
-        print(f"Error updating user settings: {str(e)}\n{error_details}")
-        raise HTTPException(status_code=500, detail=f"Error updating user settings: {str(e)}")
 
 async def fetch_prompt_from_cms(topic_ids: str):
     """Fetch prompt from CMS based on topic IDs"""

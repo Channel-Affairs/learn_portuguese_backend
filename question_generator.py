@@ -2,8 +2,6 @@ import json
 import uuid
 import random
 from typing import List, Optional
-import openai
-from pydantic import BaseModel
 from models import QuestionTypes, DifficultyLevel, MultipleChoiceQuestion, FillInTheBlankQuestion, BaseQuestion
 
 class QuestionGenerator:
