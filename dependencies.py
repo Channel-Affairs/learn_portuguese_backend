@@ -14,15 +14,6 @@ security_scheme = HTTPBearer(
     auto_error=False
 )
 
-# Counter for message IDs
-message_counter = 0
-
-# Helper function to get next message ID
-def get_next_message_id():
-    global message_counter
-    message_counter += 1
-    return message_counter
-
 # Create a safe OpenAI client function with proper error handling
 async def create_openai_completion(messages, model="gpt-3.5-turbo"):
     """Helper function to create OpenAI chat completions without proxy issues"""
@@ -172,43 +163,6 @@ async def get_current_user(
         print(f"Authentication error: {str(e)}\n{error_details}")
         raise HTTPException(status_code=401, detail=f"Authentication error: {str(e)}")
 
-
-# Function to check if a query is app-related
-def is_app_related_query(query: str) -> bool:
-    """
-    Check if query is related to Portuguese language learning.
-    Short responses like "yes", "no", "maybe" are considered app-related
-    as they could be answers to previous questions in conversation.
-    """
-    # Common short responses should be considered app-related
-    # as they're likely responses to previous conversation
-    short_responses = [
-        "yes", "no", "maybe", "ok", "okay", "sure", 
-        "thanks", "thank you", "correct", "incorrect",
-        "i do", "i don't", "i can", "i can't", "i cannot",
-        "sim", "não", "obrigado", "obrigada", "hello", "hi", "hey"
-    ]
-    
-    query_lower = query.lower().strip()
-    
-    # If it's a very short answer, consider it app-related
-    if query_lower in short_responses or len(query_lower.split()) <= 3:
-        return True
-    
-    # Portuguese language related keywords
-    portuguese_keywords = [
-        "portuguese", "portugal", "learn", "language", "speak", "words", 
-        "grammar", "vocabulary", "phrase", "sentence", "conjugate", "verb",
-        "noun", "pronoun", "translation", "meaning", "say", "pronounce"
-    ]
-    
-    # Check if any of the keywords are in the query
-    for keyword in portuguese_keywords:
-        if keyword in query_lower:
-            return True
-    
-    return False
-
 async def fetch_prompt_from_cms(topic_ids: str):
     """Fetch prompt from CMS based on topic IDs"""
     try:
@@ -260,4 +214,4 @@ async def fetch_prompt_from_cms(topic_ids: str):
                 'name': 'Portuguese language',
                 'prompt': ''
             }
-        } 
+        }

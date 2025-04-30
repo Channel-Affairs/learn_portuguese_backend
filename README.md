@@ -72,21 +72,15 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 
 ### Chat and Conversation
 
-- `POST /api/chat` - Process user messages and generate AI responses
 - `POST /api/process-message` - Process messages with topic context
 - `POST /api/conversations` - Create new conversations
 - `GET /api/conversations/{conversation_id}` - Get conversation history
 - `GET /api/conversations` - List all conversations
 
-### Question Generation and Evaluation
-
-- `POST /api/generate-questions` - Generate practice questions
-- `POST /api/evaluate-answer` - Evaluate user answers
 
 ### System
 
 - `GET /api/health` - Health check endpoint
-- `GET /api/test-openai` - Test OpenAI connection
 
 ## Dependencies
 
@@ -104,10 +98,6 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 
 1. Ensure MongoDB is running and accessible
 2. Set up your OpenAI API key
-3. Use the provided test scripts for API testing:
-   - `test_mcq.ps1` - Test multiple choice questions
-   - `test_simple.ps1` - Test basic API functionality
-   - `test_process_message.ps1` - Test message processing
 
 ### API Documentation
 
