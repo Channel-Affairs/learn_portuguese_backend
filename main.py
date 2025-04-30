@@ -258,15 +258,10 @@ async def get_current_user(
     Authenticate and return the current user based on the JWT token.
     Now accepts tokens from both the HTTPBearer security scheme and Header.
     """
-    # Debug all request headers
-    print("All headers:")
-    for key, value in request.headers.items():
-        print(f"  {key}: {value}")
     
     # Try to get token from security scheme first (Swagger UI's Authorization)
     token = None
     if credentials and credentials.credentials:
-        print(f"Token found in security scheme: {credentials.credentials[:10]}...")
         token = credentials.credentials
     # Otherwise try the Authorization header
     elif authorization:
@@ -337,7 +332,7 @@ async def get_current_user(
 
 
 # Function to detect user intent
-async def detect_user_intent(user_message: str) -> Dict[str, Any]:
+async def detect_user_intent(user_message: str, conversation_id: Optional[str] = None) -> Dict[str, Any]:
     """Detect the user's intent from their message"""
     # Use OpenAI to detect intent rather than keywords
     intent_prompt = [
@@ -368,7 +363,7 @@ async def detect_user_intent(user_message: str) -> Dict[str, Any]:
     is_simple_response = len(user_message.strip().split()) <= 3 and intent_text == "off_topic"
     in_conversation = False
     
-    if is_simple_response:
+    if is_simple_response and conversation_id:
         # Get conversation history to check context
         history = MongoDBConversationManager.get_conversation_history(conversation_id)
         
@@ -395,6 +390,9 @@ async def detect_user_intent(user_message: str) -> Dict[str, Any]:
         "intent": "general_chat"
     }
     
+    # Determine if this is a question generation intent
+    is_question_intent = "question_generation" in intent_text
+    
     if is_question_intent:
         # Extract topic if mentioned
         topic = "Portuguese language"  # Default
@@ -418,6 +416,13 @@ async def detect_user_intent(user_message: str) -> Dict[str, Any]:
             difficulty = DifficultyLevel.HARD
         elif "medium" in user_message or "intermediate" in user_message:
             difficulty = DifficultyLevel.MEDIUM
+        
+        # Extract question type from intent_text
+        question_type = None
+        if ":multiple_choice" in intent_text:
+            question_type = QuestionTypes.MULTIPLE_CHOICE
+        else:
+            question_type = QuestionTypes.FILL_IN_THE_BLANKS
         
         intent = {
             "intent": "question_request",
@@ -444,7 +449,7 @@ async def generate_ai_response(user_message: str, conversation_id: Optional[str]
     conversation_state = MongoDBConversationManager.get_state(conversation_id)
     
     # Detect user intent
-    intent = await detect_user_intent(user_message)
+    intent = await detect_user_intent(user_message, conversation_id)
     
     # Add user message to conversation history
     MongoDBConversationManager.add_message(
@@ -480,7 +485,7 @@ async def generate_ai_response(user_message: str, conversation_id: Optional[str]
                     break
     
     # Based on intent, generate appropriate response
-    if intent.get("is_question_request", False):
+    if intent.get("intent") == "question_request":
         # Handle question generation
         difficulty = conversation_state.get("difficulty_level", "medium") if conversation_state else "medium"
         
@@ -489,7 +494,7 @@ async def generate_ai_response(user_message: str, conversation_id: Optional[str]
             topic=intent.get("topic", "Portuguese language"),
             num_questions=intent.get("num_questions", 2),
             difficulty=difficulty,
-            question_types=intent.get("question_type", [QuestionTypes.MULTIPLE_CHOICE, QuestionTypes.FILL_IN_THE_BLANKS])
+            question_types=[intent.get("question_type", QuestionTypes.MULTIPLE_CHOICE)]
         )
         
         # Create response
@@ -1017,7 +1022,7 @@ async def process_message(message_data: ProcessMessage, user=Depends(get_current
         user_id = str(user["_id"])
         user_settings = db.user_settings.find_one({"user_id": user_id})
         preferred_language = user_settings.get("preferred_language", "Portuguese") if user_settings else "Portuguese"
-        
+        print(f"User Settings: {user_settings}")
         print(f"Process message request: conversation_id={conversation_id}, message='{user_message}', topic_ids='{topic_ids}', preferred_language='{preferred_language}'")
         
         
@@ -1094,7 +1099,7 @@ async def process_message(message_data: ProcessMessage, user=Depends(get_current
         is_simple_response = len(user_message.strip().split()) <= 3 and intent_text == "off_topic"
         in_conversation = False
         
-        if is_simple_response:
+        if is_simple_response and conversation_id:
             # Get conversation history to check context
             history = MongoDBConversationManager.get_conversation_history(conversation_id)
             
