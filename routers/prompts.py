@@ -51,7 +51,15 @@ class ChatPrompts:
             {"role": "user", "content": "No, I can't"},
             {"role": "assistant", "content": "general_chat"},
             {"role": "user", "content": "Maybe later"},
-            {"role": "assistant", "content": "general_chat"}
+            {"role": "assistant", "content": "general_chat"},
+            {"role": "user", "content": "fill in the blanks"},
+            {"role": "assistant", "content": "question_generation:fill_in_the_blanks"},
+            {"role": "user", "content": "Fill in the blanks"},
+            {"role": "assistant", "content": "question_generation:fill_in_the_blanks"},
+            {"role": "user", "content": "fill in the blank"},
+            {"role": "assistant", "content": "question_generation:fill_in_the_blanks"},
+            {"role": "user", "content": "Fill in the blank questions"},
+            {"role": "assistant", "content": "question_generation:fill_in_the_blanks"}
         ]
     
     @staticmethod
