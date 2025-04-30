@@ -4,12 +4,11 @@ import uuid
 from datetime import datetime
 
 # Import models and dependencies
-from ..models import (
+from models import (
     ConversationCreate, ConversationResponse, ConversationListResponse,
     ConversationHistoryResponse, Message, GetOrCreateConversation,
 )
-from ..database import MongoDBConversationManager
-from ..dependencies import get_current_user
+from database import MongoDBConversationManager
 
 # Initialize router
 router = APIRouter(
@@ -115,7 +114,7 @@ async def list_conversations(user_id: str = "default_user"):
     """List all conversations for a user"""
     try:
         # Get all conversations for the user from MongoDB
-        from ..database import conversations_collection
+        from database import conversations_collection
         conversations = list(conversations_collection.find({"user_id": user_id}))
         
         # Format conversations for response
@@ -181,4 +180,4 @@ async def get_or_create_conversation(conversation_data: GetOrCreateConversation)
         raise HTTPException(
             status_code=500,
             detail=f"Error processing conversation: {str(e)}"
-        ) 
+        )
