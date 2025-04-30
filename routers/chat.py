@@ -332,7 +332,7 @@ async def process_generated_questions(questions, num_questions, difficulty, ques
 async def ensure_enough_questions(unique_questions, question_texts, num_questions, difficulty, question_type, question_topic):
     """Ensure we have enough unique questions by generating more if needed"""
     attempts = 0
-    max_direct_attempts = 3
+    max_direct_attempts = 5  # Increased from 3 to give more chances for AI generation
     
     while len(unique_questions) < num_questions and attempts < max_direct_attempts:
         attempts += 1
@@ -341,9 +341,11 @@ async def ensure_enough_questions(unique_questions, question_texts, num_question
         try:
             if question_type[0] == QuestionTypes.MULTIPLE_CHOICE:
                 # Generate one more directly using the generator method
+                # Modify the topic slightly to encourage uniqueness
+                generation_topic = f"{question_topic} (variation {attempts})"
                 new_question = question_generator.generate_multiple_choice_question(
                     difficulty=difficulty,
-                    topic=f"{question_topic} {len(unique_questions)}"  # Add a number to make it more unique
+                    topic=generation_topic
                 )
                 
                 if new_question and new_question.questionText not in question_texts:
@@ -352,9 +354,11 @@ async def ensure_enough_questions(unique_questions, question_texts, num_question
                     print(f"Added unique multiple choice question. Now have {len(unique_questions)}/{num_questions}")
             else:
                 # Generate one more fill in the blank question directly
+                # Modify the topic slightly to encourage uniqueness
+                generation_topic = f"{question_topic} (variation {attempts})"
                 new_question = question_generator.generate_fill_in_blank_question(
                     difficulty=difficulty,
-                    topic=f"{question_topic} {len(unique_questions)}"  # Add a number to make it more unique
+                    topic=generation_topic
                 )
                 
                 if new_question and new_question.questionSentence not in question_texts:
@@ -364,148 +368,60 @@ async def ensure_enough_questions(unique_questions, question_texts, num_question
         except Exception as e:
             print(f"Error generating additional question directly: {str(e)}")
     
-    # If still not enough, add hardcoded questions
+    # If we still don't have enough questions, log it but don't add hardcoded questions
     if len(unique_questions) < num_questions:
-        if question_type[0] == QuestionTypes.MULTIPLE_CHOICE:
-            unique_questions = await add_hardcoded_multiple_choice(unique_questions, num_questions, difficulty)
+        print(f"Warning: Could only generate {len(unique_questions)} unique questions out of {num_questions} requested")
     
     return unique_questions
 
 async def generate_fallback_questions(num_questions, difficulty, question_type):
-    """Generate fallback questions if no questions were generated"""
+    """Generate fallback questions using AI with different prompts when initial generation failed"""
     fallback_questions = []
     
-    if question_type[0] == QuestionTypes.MULTIPLE_CHOICE:
-        # Generate multiple different fallback questions
-        for i in range(num_questions):
-            fallback = MultipleChoiceQuestion(
-                id=str(uuid.uuid4()),
-                type=QuestionTypes.MULTIPLE_CHOICE,
-                questionText=f"What is the Portuguese word for '{['hello', 'goodbye', 'please', 'thank you', 'yes'][i % 5]}'?",
-                questionDescription="Choose the correct translation.",
-                options=[
-                    ["Olá", "Adeus", "Bom dia", "Obrigado"],
-                    ["Adeus", "Olá", "Até logo", "Bom dia"],
-                    ["Por favor", "Obrigado", "De nada", "Sim"],
-                    ["Obrigado/Obrigada", "Por favor", "De nada", "Sim"],
-                    ["Sim", "Não", "Talvez", "Por favor"]
-                ][i % 5],
-                correct_answers=[["Olá", "Adeus", "Por favor", "Obrigado/Obrigada", "Sim"][i % 5]],
-                difficulty=difficulty,
-                hint=f"This is a common greeting or polite expression."
-            )
-            fallback_questions.append(fallback)
-    else:
-        # Generate multiple different fallback questions for fill in the blanks
-        templates = [
-            {"sentence": "Eu ____ português todos os dias.", "answer": "falo"},
-            {"sentence": "Nós ____ para a escola de manhã.", "answer": "vamos"},
-            {"sentence": "O gato ____ no sofá.", "answer": "está"},
-            {"sentence": "A casa é ____.", "answer": "grande"},
-            {"sentence": "Eles ____ muito felizes.", "answer": "são"}
-        ]
-        
-        for i in range(num_questions):
-            template = templates[i % len(templates)]
-            fallback = FillInTheBlankQuestion(
-                id=str(uuid.uuid4()),
-                type=QuestionTypes.FILL_IN_THE_BLANKS,
-                questionText="Complete the sentence with the correct word:",
-                questionDescription="Fill in the blank with the appropriate Portuguese word.",
-                questionSentence=template["sentence"],
-                correct_answers=[template["answer"]],
-                difficulty=difficulty,
-                hint=f"Think about the context of the sentence.",
-                blankSeparator="____",
-                numberOfBlanks=1
-            )
-            fallback_questions.append(fallback)
+    # Try with a more specific prompt
+    for i in range(num_questions):
+        try:
+            if question_type[0] == QuestionTypes.MULTIPLE_CHOICE:
+                # Generate with varied topics to ensure uniqueness
+                fallback_topics = [
+                    "common Portuguese greeting expressions",
+                    "Portuguese nouns and their genders",
+                    "basic Portuguese vocabulary",
+                    "Portuguese language fundamentals",
+                    "everyday Portuguese phrases"
+                ]
+                
+                topic = fallback_topics[i % len(fallback_topics)]
+                # Force a higher temperature setting to get more varied results
+                question = question_generator.generate_multiple_choice_question(
+                    difficulty=difficulty, 
+                    topic=topic
+                )
+                if question:
+                    fallback_questions.append(question)
+            else:
+                # Generate fill in the blank question with varied topics
+                fallback_topics = [
+                    "basic Portuguese verb conjugation",
+                    "Portuguese sentence structure",
+                    "common Portuguese expressions",
+                    "Portuguese adjectives",
+                    "Portuguese prepositions"
+                ]
+                
+                topic = fallback_topics[i % len(fallback_topics)]
+                question = question_generator.generate_fill_in_blank_question(
+                    difficulty=difficulty,
+                    topic=topic
+                )
+                if question:
+                    fallback_questions.append(question)
+        except Exception as e:
+            print(f"Error generating fallback question {i+1}: {str(e)}")
+            continue
     
+    print(f"Generated {len(fallback_questions)} fallback questions using AI")
     return fallback_questions
-
-async def add_hardcoded_multiple_choice(unique_questions, num_questions, difficulty):
-    """Add hardcoded multiple choice questions to reach the required number"""
-    remaining_count = num_questions - len(unique_questions)
-    print(f"FORCE ADDING {remaining_count} hardcoded multiple choice questions to meet the requirement")
-    
-    # Import random for shuffling options
-    import random
-    
-    # These are our guaranteed questions that will always be available
-    mcq_questions = [
-        {
-            "questionText": "Which Portuguese noun is feminine?",
-            "questionDescription": "Select the noun that is feminine in Portuguese.",
-            "options": ["casa (house)", "livro (book)", "carro (car)", "telefone (telephone)"],
-            "correct_answers": ["casa (house)"],
-            "hint": "Nouns ending in 'a' are typically feminine in Portuguese."
-        },
-        {
-            "questionText": "What is the correct article to use with the Portuguese noun 'livro'?",
-            "questionDescription": "Choose the appropriate definite article.",
-            "options": ["o", "a", "os", "as"],
-            "correct_answers": ["o"],
-            "hint": "Masculine singular nouns use 'o' as their definite article."
-        },
-        {
-            "questionText": "What is the plural form of the Portuguese noun 'mulher'?",
-            "questionDescription": "Select the correct plural form.",
-            "options": ["mulheres", "mulhers", "mulheris", "mulher"],
-            "correct_answers": ["mulheres"],
-            "hint": "Many Portuguese nouns add 'es' to form the plural."
-        },
-        {
-            "questionText": "Which of these Portuguese nouns is masculine?",
-            "questionDescription": "Identify the masculine noun.",
-            "options": ["sol (sun)", "flor (flower)", "nação (nation)", "noite (night)"],
-            "correct_answers": ["sol (sun)"],
-            "hint": "Most Portuguese nouns ending in consonants are masculine."
-        },
-        {
-            "questionText": "What is the correct article to use with the Portuguese noun 'mesa'?",
-            "questionDescription": "Choose the appropriate definite article.",
-            "options": ["a", "o", "as", "os"],
-            "correct_answers": ["a"],
-            "hint": "Feminine singular nouns use 'a' as their definite article."
-        },
-        {
-            "questionText": "Which word is NOT a Portuguese noun?",
-            "questionDescription": "Identify the word that is not a noun in Portuguese.",
-            "options": ["correr (to run)", "pessoa (person)", "cidade (city)", "dia (day)"],
-            "correct_answers": ["correr (to run)"],
-            "hint": "Look for the verb in the list."
-        },
-        {
-            "questionText": "What is the diminutive form of the Portuguese noun 'casa'?",
-            "questionDescription": "Select the correct diminutive form.",
-            "options": ["casinha", "casita", "casica", "casona"],
-            "correct_answers": ["casinha"],
-            "hint": "Many Portuguese diminutives are formed with the suffix '-inho/a'."
-        }
-    ]
-    
-    # Add the required number of fallback questions
-    for i in range(remaining_count):
-        question_data = mcq_questions[i % len(mcq_questions)]
-        
-        # Make a copy of the options and shuffle them
-        options = question_data["options"].copy()
-        random.shuffle(options)
-        
-        hardcoded_question = MultipleChoiceQuestion(
-            id=str(uuid.uuid4()),
-            type=QuestionTypes.MULTIPLE_CHOICE,
-            questionText=question_data["questionText"],
-            questionDescription=question_data["questionDescription"],
-            options=options,
-            correct_answers=question_data["correct_answers"],
-            difficulty=difficulty,
-            hint=question_data["hint"]
-        )
-        unique_questions.append(hardcoded_question)
-        print(f"Added hardcoded MCQ #{i+1} with randomized options")
-    
-    return unique_questions
 
 async def handle_general_chat(user_message, conversation_id, topic_name, cms_prompt):
     """Handle general chat interactions"""

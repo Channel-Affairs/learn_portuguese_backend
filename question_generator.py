@@ -152,6 +152,7 @@ class QuestionGenerator:
         }}
         """
         
+        # First attempt
         response_text = self._get_openai_completion(prompt)
         
         try:
@@ -181,65 +182,69 @@ class QuestionGenerator:
             print(f"Error parsing JSON from OpenAI: {str(e)}")
             print(f"Response was: {response_text}")
             
-            # Fallback to a default question - but create more varied default questions
-            # based on the topic to avoid duplication
-            
-            # Choose from several fallback questions based on a hash of the topic
-            # This helps ensure different questions when called multiple times
-            hash_value = sum(ord(c) for c in topic) % 5
-            
-            fallback_questions = [
-                {
-                    "questionText": f"What is the correct gender for the Portuguese noun 'livro'?",
-                    "options": ["masculine (o livro)", "feminine (a livro)", "neutral (o/a livro)", "collective (os livro)"],
-                    "correct_answers": ["masculine (o livro)"],
-                    "hint": "Most Portuguese nouns ending in 'o' are masculine."
-                },
-                {
-                    "questionText": f"Which word is feminine in Portuguese?",
-                    "options": ["casa (house)", "carro (car)", "livro (book)", "telefone (telephone)"],
-                    "correct_answers": ["casa (house)"],
-                    "hint": "Look for words that typically use the article 'a' instead of 'o'."
-                },
-                {
-                    "questionText": f"What is the correct plural form of 'animal' in Portuguese?",
-                    "options": ["animais", "animals", "animalos", "animal"],
-                    "correct_answers": ["animais"],
-                    "hint": "Words ending in 'al' often change to 'ais' in the plural form."
-                },
-                {
-                    "questionText": f"Which Portuguese greeting is typically used in the morning?",
-                    "options": ["Bom dia", "Boa tarde", "Boa noite", "Olá"],
-                    "correct_answers": ["Bom dia"],
-                    "hint": "'Dia' means 'day' in Portuguese."
-                },
-                {
-                    "questionText": f"What is the Portuguese word for 'thank you'?",
-                    "options": ["Obrigado/Obrigada", "Por favor", "De nada", "Com licença"],
-                    "correct_answers": ["Obrigado/Obrigada"],
-                    "hint": "This word changes form based on the speaker's gender."
-                }
-            ]
-            
-            fallback = fallback_questions[hash_value]
-            
-            # Randomize the options in the fallback questions too
-            options = fallback["options"].copy()
-            correct_answer = fallback["correct_answers"][0]
-            
-            # Shuffle the options
-            random.shuffle(options)
-            
-            return MultipleChoiceQuestion(
-                id=str(uuid.uuid4()),
-                type=QuestionTypes.MULTIPLE_CHOICE,
-                questionText=fallback["questionText"],
-                questionDescription=f"Choose the correct answer about {topic}.",
-                options=options,
-                correct_answers=fallback["correct_answers"],
-                difficulty=difficulty,
-                hint=fallback["hint"]
-            )
+            # Second attempt with a simplified prompt
+            try:
+                retry_prompt = f"""Create a simple Portuguese language multiple choice question about '{topic}'.
+                
+                Format the response as a JSON object with:
+                - questionText: The question text
+                - questionDescription: A brief instruction
+                - options: Four possible answers as a list of strings (first one is correct)
+                - correct_answers: A list with just the correct answer
+                - hint: A subtle hint
+                
+                Response must be valid JSON."""
+                
+                retry_response = self._get_openai_completion(retry_prompt)
+                retry_json = json.loads(retry_response)
+                
+                options = retry_json["options"].copy()
+                random.shuffle(options)
+                
+                return MultipleChoiceQuestion(
+                    id=str(uuid.uuid4()),
+                    type=QuestionTypes.MULTIPLE_CHOICE,
+                    questionText=retry_json["questionText"],
+                    questionDescription=retry_json["questionDescription"],
+                    options=options,
+                    correct_answers=retry_json["correct_answers"],
+                    difficulty=difficulty,
+                    hint=retry_json["hint"]
+                )
+            except Exception as retry_error:
+                print(f"Second attempt also failed: {str(retry_error)}")
+                
+                # Third attempt with explicit structure
+                final_prompt = f"""Create a basic Portuguese multiple choice question.
+                Return ONLY a JSON object with this exact structure:
+                {{
+                    "questionText": "What is X in Portuguese?",
+                    "questionDescription": "Choose the correct option.",
+                    "options": ["option1", "option2", "option3", "option4"],
+                    "correct_answers": ["option1"],
+                    "hint": "A hint about Portuguese."
+                }}"""
+                
+                try:
+                    final_response = self._get_openai_completion(final_prompt)
+                    final_json = json.loads(final_response)
+                    
+                    options = final_json["options"].copy()
+                    random.shuffle(options)
+                    
+                    return MultipleChoiceQuestion(
+                        id=str(uuid.uuid4()),
+                        type=QuestionTypes.MULTIPLE_CHOICE,
+                        questionText=final_json["questionText"],
+                        questionDescription=final_json["questionDescription"],
+                        options=options,
+                        correct_answers=final_json["correct_answers"],
+                        difficulty=difficulty,
+                        hint=final_json["hint"]
+                    )
+                except Exception as final_error:
+                    print(f"All attempts to generate question failed: {str(final_error)}")
+                    raise final_error
     
     def generate_fill_in_blank_question(
         self, 
@@ -271,6 +276,7 @@ class QuestionGenerator:
         }}
         """
         
+        # First attempt
         response_text = self._get_openai_completion(prompt)
         
         try:
@@ -295,19 +301,67 @@ class QuestionGenerator:
             print(f"Error parsing JSON from OpenAI: {str(e)}")
             print(f"Response was: {response_text}")
             
-            # Fallback to a default question
-            return FillInTheBlankQuestion(
-                id=str(uuid.uuid4()),
-                type=QuestionTypes.FILL_IN_THE_BLANKS,
-                questionText="Complete the sentence with the correct verb form:",
-                questionDescription="Fill in the blank with the correct conjugation of 'falar'.",
-                questionSentence="Eu ____ português todos os dias.",
-                correct_answers=["falo"],
-                difficulty=difficulty,
-                hint="The verb is conjugated in the first person singular present tense.",
-                blankSeparator="____",
-                numberOfBlanks=1
-            )
+            # Second attempt with a simplified prompt
+            try:
+                retry_prompt = f"""Create a simple Portuguese fill-in-the-blank question.
+                
+                Format as valid JSON with:
+                - questionText: The question text
+                - questionDescription: A brief instruction
+                - questionSentence: A Portuguese sentence with ____ for the blank
+                - correct_answers: A list with the answer
+                - hint: A helpful hint
+                
+                Response must be valid JSON."""
+                
+                retry_response = self._get_openai_completion(retry_prompt)
+                retry_json = json.loads(retry_response)
+                
+                return FillInTheBlankQuestion(
+                    id=str(uuid.uuid4()),
+                    type=QuestionTypes.FILL_IN_THE_BLANKS,
+                    questionText=retry_json["questionText"],
+                    questionDescription=retry_json["questionDescription"],
+                    questionSentence=retry_json["questionSentence"],
+                    correct_answers=retry_json["correct_answers"],
+                    difficulty=difficulty,
+                    hint=retry_json["hint"],
+                    blankSeparator="____",
+                    numberOfBlanks=1
+                )
+            except Exception as retry_error:
+                print(f"Second attempt also failed: {str(retry_error)}")
+                
+                # Third attempt with explicit structure
+                final_prompt = f"""Create a basic Portuguese fill-in-the-blank question.
+                Return ONLY a JSON object with this exact structure:
+                {{
+                    "questionText": "Fill in the blank:",
+                    "questionDescription": "Complete the sentence.",
+                    "questionSentence": "Portuguese sentence with ____ for blank.",
+                    "correct_answers": ["answer"],
+                    "hint": "A hint about Portuguese."
+                }}"""
+                
+                try:
+                    final_response = self._get_openai_completion(final_prompt)
+                    final_json = json.loads(final_response)
+                    
+                    return FillInTheBlankQuestion(
+                        id=str(uuid.uuid4()),
+                        type=QuestionTypes.FILL_IN_THE_BLANKS,
+                        questionText=final_json["questionText"],
+                        questionDescription=final_json["questionDescription"],
+                        questionSentence=final_json["questionSentence"],
+                        correct_answers=final_json["correct_answers"],
+                        difficulty=difficulty,
+                        hint=final_json["hint"],
+                        blankSeparator="____",
+                        numberOfBlanks=1
+                    )
+                except Exception as final_error:
+                    print(f"All attempts to generate question failed: {str(final_error)}")
+                    raise final_error
     
     def generate_questions(
         self, 
@@ -339,49 +393,90 @@ class QuestionGenerator:
                 # Randomly select question type from the provided types
                 question_type = random.choice(question_types)
                 
+                # Make the topic slightly different for each question to encourage uniqueness
+                variation_topic = f"{topic} (variation {i+1})"
+                
                 if question_type == QuestionTypes.MULTIPLE_CHOICE:
-                    question = self.generate_multiple_choice_question(difficulty, topic)
+                    question = self.generate_multiple_choice_question(difficulty, variation_topic)
                     if question:  # Only add if it's not None
                         questions.append(question)
                 elif question_type == QuestionTypes.FILL_IN_THE_BLANKS:
-                    question = self.generate_fill_in_blank_question(difficulty, topic)
+                    question = self.generate_fill_in_blank_question(difficulty, variation_topic)
                     if question:  # Only add if it's not None
                         questions.append(question)
             except Exception as e:
                 print(f"Error generating question {i+1}: {str(e)}")
                 continue  # Skip this question and try the next one
                 
-        # Ensure we always return at least one question
+        # If no questions were generated, try one more time with a more generic topic
         if not questions:
-            # Create a default fill-in-the-blank question as fallback
+            print("Failed to generate any questions. Trying one more time with simplified approach.")
+            
             try:
-                if QuestionTypes.FILL_IN_THE_BLANKS in question_types:
-                    fallback = FillInTheBlankQuestion(
+                # Try with a more simplified approach for at least one question
+                generic_topic = "basic Portuguese"
+                question_type = question_types[0]  # Use the first specified type
+                
+                if question_type == QuestionTypes.MULTIPLE_CHOICE:
+                    # Use the most simplified prompt
+                    simplified_prompt = """Create a basic Portuguese multiple choice question.
+                    Format the response EXACTLY as:
+                    {
+                        "questionText": "A simple Portuguese question?",
+                        "questionDescription": "Choose the correct option.",
+                        "options": ["option1", "option2", "option3", "option4"],
+                        "correct_answers": ["option1"],
+                        "hint": "A hint about Portuguese."
+                    }"""
+                    
+                    response = self._get_openai_completion(simplified_prompt)
+                    response_json = json.loads(response)
+                    
+                    options = response_json["options"].copy()
+                    random.shuffle(options)
+                    
+                    question = MultipleChoiceQuestion(
+                        id=str(uuid.uuid4()),
+                        type=QuestionTypes.MULTIPLE_CHOICE,
+                        questionText=response_json["questionText"],
+                        questionDescription=response_json["questionDescription"],
+                        options=options,
+                        correct_answers=response_json["correct_answers"],
+                        difficulty=difficulty,
+                        hint=response_json["hint"]
+                    )
+                    questions.append(question)
+                else:
+                    # Simplified fill-in-the-blank
+                    simplified_prompt = """Create a simple Portuguese fill-in-the-blank question.
+                    Format the response EXACTLY as:
+                    {
+                        "questionText": "Fill in the blank:",
+                        "questionDescription": "Complete the Portuguese sentence.",
+                        "questionSentence": "A simple Portuguese sentence with ____ for the blank.",
+                        "correct_answers": ["answer"],
+                        "hint": "A simple hint."
+                    }"""
+                    
+                    response = self._get_openai_completion(simplified_prompt)
+                    response_json = json.loads(response)
+                    
+                    question = FillInTheBlankQuestion(
                         id=str(uuid.uuid4()),
                         type=QuestionTypes.FILL_IN_THE_BLANKS,
-                        questionText="Complete the sentence with the correct verb form:",
-                        questionDescription="Fill in the blank with the correct conjugation of 'falar'.",
-                        questionSentence="Eu ____ português todos os dias.",
-                        correct_answers=["falo"],
+                        questionText=response_json["questionText"],
+                        questionDescription=response_json["questionDescription"],
+                        questionSentence=response_json["questionSentence"],
+                        correct_answers=response_json["correct_answers"],
                         difficulty=difficulty,
-                        hint="The verb is conjugated in the first person singular present tense.",
+                        hint=response_json["hint"],
                         blankSeparator="____",
                         numberOfBlanks=1
                     )
-                    questions.append(fallback)
-                else:
-                    fallback = MultipleChoiceQuestion(
-                        id=str(uuid.uuid4()),
-                        type=QuestionTypes.MULTIPLE_CHOICE,
-                        questionText=f"What is 'hello' in Portuguese?",
-                        questionDescription="Choose the correct translation.",
-                        options=["Olá", "Adeus", "Bom dia", "Obrigado"],
-                        correct_answers=["Olá"],
-                        difficulty=difficulty,
-                        hint=f"This is a common greeting."
-                    )
-                    questions.append(fallback)
-            except Exception as e:
-                print(f"Error creating fallback question: {str(e)}")
+                    questions.append(question)
+            except Exception as final_e:
+                print(f"Final attempt to generate question also failed: {str(final_e)}")
+                # At this point we've tried everything and failed.
+                # We'll return an empty list and let the caller handle it.
                 
         return questions 
