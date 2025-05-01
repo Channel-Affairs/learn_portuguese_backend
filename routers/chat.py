@@ -485,13 +485,13 @@ async def handle_general_chat(user_message, conversation_id, topic_name, cms_pro
         }
     )
     
-    # Return the response
+    # Return the response with HTML formatting preserved
     result = {
         "type": "text",
         "intent": "general_chat",
-        "message": ai_message,
+        "message": ai_message,  # This will contain the HTML tags
         "topic": topic_name,
-        "topic_name": topic_name
+        "topic_name": topic_name,
     }
     return result
 
