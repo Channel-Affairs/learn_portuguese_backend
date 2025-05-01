@@ -111,7 +111,7 @@ async def check_short_response_context(user_message, intent_text, conversation_i
     
     return intent_text, in_conversation
 
-async def handle_off_topic(user_message, conversation_id, topic_name):
+async def handle_off_topic(user_message, conversation_id, topic_name, preferred_language="English"):
     """Handle off-topic messages with a redirect to Portuguese learning"""
     # Store the message in conversation history
     MongoDBConversationManager.add_message(
@@ -126,7 +126,7 @@ async def handle_off_topic(user_message, conversation_id, topic_name):
     # Generate a contextual response redirecting to Portuguese learning
     # using OpenAI instead of hardcoded response
     redirect_prompt = [
-        {"role": "system", "content": ChatPrompts.off_topic_redirect_prompt(topic_name)},
+        {"role": "system", "content": ChatPrompts.off_topic_redirect_prompt(topic_name, preferred_language)},
         {"role": "user", "content": user_message}
     ]
     
@@ -203,7 +203,8 @@ async def generate_and_process_questions(
     difficulty, 
     question_type, 
     topic_name,
-    cms_prompt
+    cms_prompt,
+    preferred_language="English"
 ):
     """Generate questions and process them for response"""
     print(f"Generating questions with topic={question_topic}, num_questions={num_questions}, difficulty={difficulty}, question_types={question_type}")
@@ -215,7 +216,7 @@ async def generate_and_process_questions(
     if cms_prompt:
         # Configure the question generator with the custom prompt
         question_generator.configure_custom_prompt(
-            ChatPrompts.question_generation_prompt(question_topic, cms_prompt)
+            ChatPrompts.question_generation_prompt(question_topic, cms_prompt, preferred_language)
         )
         print("Using custom CMS prompt for question generation")
     
@@ -230,7 +231,8 @@ async def generate_and_process_questions(
             topic=question_topic,
             num_questions=adjusted_num_questions,
             difficulty=difficulty,
-            question_types=question_type
+            question_types=question_type,
+            preferred_language=preferred_language
         )
     finally:
         # Reset the custom prompt after generating questions
@@ -239,7 +241,7 @@ async def generate_and_process_questions(
             print("Reset custom prompt in question generator")
     
     # Process questions for uniqueness and fallbacks
-    processed_questions = await process_generated_questions(questions, num_questions, difficulty, question_type, question_topic)
+    processed_questions = await process_generated_questions(questions, num_questions, difficulty, question_type, question_topic, preferred_language)
     
     # Store the message and response in the conversation history
     MongoDBConversationManager.add_message(
@@ -288,11 +290,11 @@ async def generate_and_process_questions(
     print(f"Returning result with {len(all_questions)} questions")
     return result
 
-async def process_generated_questions(questions, num_questions, difficulty, question_type, question_topic):
+async def process_generated_questions(questions, num_questions, difficulty, question_type, question_topic, preferred_language="English"):
     """Process generated questions for uniqueness and add fallbacks if needed"""
     if not questions:
         print("Warning: No questions were generated. Using fallback questions.")
-        return await generate_fallback_questions(num_questions, difficulty, question_type)
+        return await generate_fallback_questions(num_questions, difficulty, question_type, preferred_language)
     
     # Ensure we have unique questions
     unique_questions = []
@@ -319,7 +321,7 @@ async def process_generated_questions(questions, num_questions, difficulty, ques
     # If we still don't have enough unique questions after initial generation,
     # generate more using direct method calls
     unique_questions = await ensure_enough_questions(
-        unique_questions, question_texts, num_questions, difficulty, question_type, question_topic
+        unique_questions, question_texts, num_questions, difficulty, question_type, question_topic, preferred_language
     )
     
     # Ensure we have exactly the right number of questions
@@ -329,7 +331,7 @@ async def process_generated_questions(questions, num_questions, difficulty, ques
     
     return unique_questions
 
-async def ensure_enough_questions(unique_questions, question_texts, num_questions, difficulty, question_type, question_topic):
+async def ensure_enough_questions(unique_questions, question_texts, num_questions, difficulty, question_type, question_topic, preferred_language="English"):
     """Ensure we have enough unique questions by generating more if needed"""
     attempts = 0
     max_direct_attempts = 5  # Increased from 3 to give more chances for AI generation
@@ -345,7 +347,8 @@ async def ensure_enough_questions(unique_questions, question_texts, num_question
                 generation_topic = f"{question_topic} (variation {attempts})"
                 new_question = question_generator.generate_multiple_choice_question(
                     difficulty=difficulty,
-                    topic=generation_topic
+                    topic=generation_topic,
+                    preferred_language=preferred_language
                 )
                 
                 if new_question and new_question.questionText not in question_texts:
@@ -358,7 +361,8 @@ async def ensure_enough_questions(unique_questions, question_texts, num_question
                 generation_topic = f"{question_topic} (variation {attempts})"
                 new_question = question_generator.generate_fill_in_blank_question(
                     difficulty=difficulty,
-                    topic=generation_topic
+                    topic=generation_topic,
+                    preferred_language=preferred_language
                 )
                 
                 if new_question and new_question.questionSentence not in question_texts:
@@ -374,7 +378,7 @@ async def ensure_enough_questions(unique_questions, question_texts, num_question
     
     return unique_questions
 
-async def generate_fallback_questions(num_questions, difficulty, question_type):
+async def generate_fallback_questions(num_questions, difficulty, question_type, preferred_language="English"):
     """Generate fallback questions using AI with different prompts when initial generation failed"""
     fallback_questions = []
     
@@ -395,7 +399,8 @@ async def generate_fallback_questions(num_questions, difficulty, question_type):
                 # Force a higher temperature setting to get more varied results
                 question = question_generator.generate_multiple_choice_question(
                     difficulty=difficulty, 
-                    topic=topic
+                    topic=topic,
+                    preferred_language=preferred_language
                 )
                 if question:
                     fallback_questions.append(question)
@@ -412,7 +417,8 @@ async def generate_fallback_questions(num_questions, difficulty, question_type):
                 topic = fallback_topics[i % len(fallback_topics)]
                 question = question_generator.generate_fill_in_blank_question(
                     difficulty=difficulty,
-                    topic=topic
+                    topic=topic,
+                    preferred_language=preferred_language
                 )
                 if question:
                     fallback_questions.append(question)
@@ -423,12 +429,12 @@ async def generate_fallback_questions(num_questions, difficulty, question_type):
     print(f"Generated {len(fallback_questions)} fallback questions using AI")
     return fallback_questions
 
-async def handle_general_chat(user_message, conversation_id, topic_name, cms_prompt):
+async def handle_general_chat(user_message, conversation_id, topic_name, cms_prompt, preferred_language="English"):
     """Handle general chat interactions"""
     print(f"Processing general chat for topic: {topic_name}")
     
     # Create context with topic to maintain the conversation focus and incorporate CMS prompt
-    system_prompt = ChatPrompts.general_chat_prompt(topic_name, cms_prompt)
+    system_prompt = ChatPrompts.general_chat_prompt(topic_name, cms_prompt, preferred_language)
 
     # Create context with topic and history
     context_messages = [
@@ -519,7 +525,7 @@ async def process_message(message_data: ProcessMessage, user=Depends(get_current
         # Handle off-topic messages
         if intent_text == "off_topic":
             print("Detected off-topic request")
-            return await handle_off_topic(user_message, conversation_id, topic_name)
+            return await handle_off_topic(user_message, conversation_id, topic_name, preferred_language)
         
         # Determine if this is a question generation request
         is_question_intent = "question_generation" in intent_text
@@ -541,11 +547,12 @@ async def process_message(message_data: ProcessMessage, user=Depends(get_current
                 difficulty, 
                 question_type, 
                 topic_name,
-                cms_prompt
+                cms_prompt,
+                preferred_language
             )
         else:
             # Handle general chat
-            return await handle_general_chat(user_message, conversation_id, topic_name, cms_prompt)
+            return await handle_general_chat(user_message, conversation_id, topic_name, cms_prompt, preferred_language)
             
     except Exception as e:
         import traceback

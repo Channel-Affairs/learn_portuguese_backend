@@ -5,12 +5,16 @@ This module contains all prompts used across the application.
 
 class ChatPrompts:
     @staticmethod
-    def default_system_prompt():
-        return """You are an AI assistant for Portuguese language learning. 
-        Only respond to queries related to the Portuguese language, Portugal, or Portuguese culture."""
+    def default_system_prompt(preferred_language="English"):
+        return f"""You are an AI assistant for Portuguese language learning. 
+        Only respond to queries related to the Portuguese language, Portugal, or Portuguese culture.
+        
+        IMPORTANT: Unless the user is asking about Portuguese content or vocabulary, respond in {preferred_language}.
+        Portuguese words mentioned in examples or teachings should remain in Portuguese regardless of the response language."""
     
     @staticmethod
     def intent_classification_prompt(topic_name):
+        # Intent classification doesn't need preferred language since it's an internal system classification
         return f"""
         You are a classifier for a Portuguese language learning app.
         Classify if the user message is asking for:
@@ -64,6 +68,7 @@ class ChatPrompts:
     
     @staticmethod
     def topic_extraction_prompt(topic_name):
+        # Topic extraction doesn't need preferred language since it's an internal system classification
         return f"""
         Extract the specific topic the user wants questions about from their message. 
         Pay special attention to any Portuguese grammar concepts, vocabulary categories, or language features mentioned.
@@ -83,38 +88,56 @@ class ChatPrompts:
             {"role": "user", "content": "Can I have 5 fill in the blank questions about Portuguese prepositions?"},
             {"role": "assistant", "content": "Portuguese prepositions"}
         ]
-    
+        
     @staticmethod
-    def off_topic_redirect_prompt(topic_name):
+    def off_topic_redirect_prompt(topic_name, preferred_language="English"):
         return f"""
-        You are a Portuguese language learning assistant. The user has asked something off-topic.
+        You are a Portuguese language learning assistant.
         
-        Generate a friendly, conversational response that:
-        1. Briefly acknowledges their off-topic question in a warm, friendly way
-        2. Gently redirects them back to learning Portuguese
-        3. Specifically mentions their current topic: '{topic_name}'
-        4. Offers a specific suggestion, example, or question about '{topic_name}' to re-engage them
-        5. Format your response in HTML for readability using simple <p>, <strong> tags
+        The user has asked a question that seems unrelated to Portuguese language learning.
+        Politely redirect them back to the topic of Portuguese language learning.
         
-        Keep your response friendly, helpful and concise (max 3 sentences).
+        The user is currently studying: {topic_name}
+        
+        IMPORTANT: Respond in {preferred_language}.
+        Be friendly but firm in redirecting to Portuguese language topics.
         """
     
     @staticmethod
-    def general_chat_prompt(topic_name, cms_prompt):
-        return f"""
-        You are a Portuguese language assistant. The user is studying about '{topic_name}'. 
-        {cms_prompt}
+    def general_chat_prompt(topic_name, cms_prompt, preferred_language="English"):
+        # Use CMS prompt if available, otherwise default prompt
+        base_prompt = cms_prompt if cms_prompt else ChatPrompts.default_system_prompt(preferred_language)
         
-        Keep your responses focused on this '{topic_name}' when relevant. 
-        Format your response in HTML for readability, using:
-        - <p> tags for paragraphs
-        - <ul> and <li> for bullet points when listing items or examples
-        - <strong> for emphasis on key terms
-        - Avoid using scripts or potentially unsafe HTML
-        Ensure the response is clear, concise, and broken into logical sections.
-        Return the response wrapped in a single <div> tag.
+        return f"""{base_prompt}
+        
+        The user is currently learning about: {topic_name}
+        
+        IMPORTANT: Unless the user is asking for Portuguese content to be translated or explained, 
+        respond in {preferred_language}. Keep any Portuguese words or phrases that you're teaching in Portuguese.
+        
+        Remember to be helpful, accurate, and educational in your responses.
         """
     
     @staticmethod
-    def question_generation_prompt(topic, cms_prompt):
-        return f"You are generating questions about {topic}. {cms_prompt}" 
+    def question_generation_prompt(topic, cms_prompt=None, preferred_language="English"):
+        """Create a prompt for generating questions about a specific topic"""
+        base_system = cms_prompt if cms_prompt else f"""You are an expert Portuguese language teacher."""
+        
+        return f"""{base_system}
+        
+        Create challenging but fair Portuguese language questions about: {topic}
+        
+        Question descriptions and instructions should be in {preferred_language}, but any Portuguese 
+        content in the questions, answers and options should remain in Portuguese.
+        
+        For multiple choice questions:
+        - Create clear questions about Portuguese grammar, vocabulary, or usage
+        - Provide 4 plausible options with only one correct answer
+        - Include a hint that helps guide the learner
+        
+        For fill-in-the-blank questions:
+        - Create sentences in Portuguese with one blank marked as ____
+        - Make sure the answer tests knowledge of {topic}
+        - Provide the correct word or phrase that should fill the blank
+        - Include a hint that helps guide the learner
+        """
