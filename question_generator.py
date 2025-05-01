@@ -118,8 +118,7 @@ class QuestionGenerator:
     def generate_multiple_choice_question(
         self, 
         difficulty: DifficultyLevel, 
-        topic: str = "basic vocabulary",
-        preferred_language: str = "English"
+        topic: str = "basic vocabulary"
     ) -> MultipleChoiceQuestion:
         """Generate a multiple choice question about Portuguese"""
         # Generate the question using a more varied approach with OpenAI
@@ -137,14 +136,14 @@ class QuestionGenerator:
         If the topic is about grammar, focus on sentence structure, prepositions, or articles.
         
         Format your response as a valid JSON object with these keys:
-        - questionText: The full text of the question (make this detailed and specific)
-        - questionDescription: Brief description of what to do
+        - questionText: The full text of the question in English
+        - questionDescription: Brief description of what to do in English
         - options: A list of 4 options (first one should be correct)
         - correct_answers: A list with just the correct answer as string
-        - hint: A subtle hint to help the user
+        - hint: A subtle hint to help the user in English
         
-        NOTE: Write the questionText and questionDescription in {preferred_language}, but any Portuguese vocabulary, 
-        grammar structures, or language examples should remain in Portuguese.
+        IMPORTANT: Write questionText, questionDescription and hint in English, but keep any Portuguese vocabulary, 
+        grammar structures, or language examples in Portuguese.
         
         Example format:
         {{
@@ -191,11 +190,14 @@ class QuestionGenerator:
                 retry_prompt = f"""Create a simple Portuguese language multiple choice question about '{topic}'.
                 
                 Format the response as a JSON object with:
-                - questionText: The question text in {preferred_language}
-                - questionDescription: A brief instruction in {preferred_language}
+                - questionText: The question text in English
+                - questionDescription: A brief instruction in English
                 - options: Four possible answers as a list of strings (first one is correct)
                 - correct_answers: A list with just the correct answer
-                - hint: A subtle hint in {preferred_language}
+                - hint: A helpful hint in English
+                
+                IMPORTANT: Write questionText, questionDescription and hint in English, but keep any Portuguese vocabulary, 
+                grammar structures, or language examples in Portuguese.
                 
                 Response must be valid JSON."""
                 
@@ -229,7 +231,8 @@ class QuestionGenerator:
                     "hint": "A hint about Portuguese."
                 }}
                 
-                Write questionText, questionDescription and hint in {preferred_language}, but keep Portuguese words in Portuguese."""
+                IMPORTANT: Write questionText, questionDescription and hint in English, but keep any Portuguese vocabulary, 
+                grammar structures, or language examples in Portuguese."""
                 
                 try:
                     final_response = self._get_openai_completion(final_prompt)
@@ -255,8 +258,7 @@ class QuestionGenerator:
     def generate_fill_in_blank_question(
         self, 
         difficulty: DifficultyLevel,
-        topic: str = "verb conjugation",
-        preferred_language: str = "English"
+        topic: str = "verb conjugation"
     ) -> FillInTheBlankQuestion:
         """Generate a fill-in-the-blank question about Portuguese"""
         # Use OpenAI to generate a question
@@ -267,11 +269,11 @@ class QuestionGenerator:
         4. Provide the correct answer
         
         Format your response as a valid JSON object with these keys:
-        - questionText: The full text of the question in {preferred_language}
-        - questionDescription: Brief description of what to do in {preferred_language}
+        - questionText: The full text of the question in English
+        - questionDescription: Brief description of what to do in English
         - questionSentence: The sentence with ____ as the blank (keep this in Portuguese)
         - correct_answers: A list with just the correct answer as string
-        - hint: A subtle hint to help the user in {preferred_language}
+        - hint: A subtle hint to help the user in English
         
         Example format:
         {{
@@ -313,11 +315,11 @@ class QuestionGenerator:
                 retry_prompt = f"""Create a simple Portuguese fill-in-the-blank question.
                 
                 Format as valid JSON with:
-                - questionText: The question text in {preferred_language}
-                - questionDescription: A brief instruction in {preferred_language}
+                - questionText: The question text in English
+                - questionDescription: A brief instruction in English
                 - questionSentence: A Portuguese sentence with ____ for the blank (keep this in Portuguese)
                 - correct_answers: A list with the answer
-                - hint: A helpful hint in {preferred_language}
+                - hint: A helpful hint in English
                 
                 Response must be valid JSON."""
                 
@@ -350,7 +352,7 @@ class QuestionGenerator:
                     "hint": "A hint about Portuguese."
                 }}
                 
-                Write questionText, questionDescription and hint in {preferred_language}, but keep the questionSentence in Portuguese."""
+                Write questionText, questionDescription and hint in English, but keep the questionSentence in Portuguese."""
                 
                 try:
                     final_response = self._get_openai_completion(final_prompt)
@@ -377,8 +379,7 @@ class QuestionGenerator:
         num_questions: int = 2,
         difficulty: Optional[DifficultyLevel] = None,
         question_types: Optional[List[QuestionTypes]] = None,
-        topic: str = "Portuguese language",
-        preferred_language: str = "English"
+        topic: str = "Portuguese language"
     ) -> List[BaseQuestion]:
         """Generate a list of Portuguese language questions"""
         # Set default difficulty if not provided
@@ -409,16 +410,14 @@ class QuestionGenerator:
                 if question_type == QuestionTypes.MULTIPLE_CHOICE:
                     question = self.generate_multiple_choice_question(
                         difficulty=difficulty, 
-                        topic=variation_topic,
-                        preferred_language=preferred_language
+                        topic=variation_topic
                     )
                     if question:  # Only add if it's not None
                         questions.append(question)
                 elif question_type == QuestionTypes.FILL_IN_THE_BLANKS:
                     question = self.generate_fill_in_blank_question(
                         difficulty=difficulty, 
-                        topic=variation_topic,
-                        preferred_language=preferred_language
+                        topic=variation_topic
                     )
                     if question:  # Only add if it's not None
                         questions.append(question)
@@ -440,14 +439,15 @@ class QuestionGenerator:
                     simplified_prompt = f"""Create a basic Portuguese multiple choice question.
                     Format the response EXACTLY as:
                     {{
-                        "questionText": "A simple Portuguese question?",
+                        "questionText": "What is X in Portuguese?",
                         "questionDescription": "Choose the correct option.",
                         "options": ["option1", "option2", "option3", "option4"],
                         "correct_answers": ["option1"],
                         "hint": "A hint about Portuguese."
                     }}
                     
-                    Write questionText, questionDescription and hint in {preferred_language}, but keep Portuguese words in Portuguese."""
+                    IMPORTANT: Write questionText, questionDescription and hint in English, but keep any Portuguese vocabulary, 
+                    grammar structures, or language examples in Portuguese."""
                     
                     response = self._get_openai_completion(simplified_prompt)
                     response_json = json.loads(response)
@@ -478,7 +478,7 @@ class QuestionGenerator:
                         "hint": "A simple hint."
                     }}
                     
-                    Write questionText, questionDescription and hint in {preferred_language}, but keep the questionSentence in Portuguese."""
+                    Write questionText, questionDescription and hint in English, but keep the questionSentence in Portuguese."""
                     
                     response = self._get_openai_completion(simplified_prompt)
                     response_json = json.loads(response)

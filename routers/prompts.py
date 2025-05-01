@@ -152,9 +152,7 @@ class ChatPrompts:
         5. Use <ul> and <li> for lists of examples or explanations.
         6. Keep the HTML clean and semantic.
         7. Be helpful, accurate, and educational in your responses.
-        8. Remember to be helpful, accurate, and educational in your responses.
-
-        """
+        8. Remember to be helpful, accurate, and educational in your responses."""
     
     @staticmethod
     def question_generation_prompt(topic, cms_prompt=None, preferred_language="English"):
