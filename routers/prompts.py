@@ -7,9 +7,9 @@ class ChatPrompts:
     @staticmethod
     def default_system_prompt(preferred_language="English"):
         return f"""You are an AI assistant for Portuguese language learning. 
-        Only respond to queries related to the Portuguese language, Portugal, or Portuguese culture.
+        ONLY respond to queries related to Portuguese language learning, Portuguese grammar, vocabulary, or culture.
         
-        IMPORTANT: 
+        IMPORTANT RULES: 
         1. Unless the user is asking about Portuguese content or vocabulary, respond in {preferred_language}.
         2. Portuguese words mentioned in examples or teachings should remain in Portuguese regardless of the response language.
         3. Format all responses in HTML without doctype tag. Use these HTML tags:
@@ -33,12 +33,17 @@ class ChatPrompts:
         - question_generation:multiple_choice - they want multiple choice questions about Portuguese
         - question_generation:fill_in_the_blanks - they want fill-in-the-blank exercises for Portuguese
         - general_chat - they want to generally talk about Portuguese language or related topics
-        - off_topic - they're asking about something not related to Portuguese
+        - off_topic - they're asking about something not related to Portuguese learning
         
-        They are currently learning about: {topic_name}
+        IMPORTANT RULES:
+        1. When user mentions "exercise", "practice", "quiz", "test", "mcq", "mcqs", "multiple choice" in context of Portuguese learning, classify as question_generation:multiple_choice
+        2. When user message EXACTLY matches "Correct my sentence" or "Teach me", classify as question_generation:fill_in_the_blanks
+        3. When user message contains additional context beyond "Correct my sentence" or "Teach me", classify as general_chat
+        4. Short responses like "yes", "no", "maybe", "I can't", etc. should be classified as "general_chat"
+        5. Any non-Portuguese learning topics should be "off_topic"
+        6. Messages in languages other than English or Portuguese should be "off_topic"
         
-        IMPORTANT: Short responses like "yes", "no", "maybe", "I can't", etc. should be classified as 
-        "general_chat" as they are likely responses to previous questions in the conversation.
+        Current learning topic: {topic_name}
         
         Return ONLY one of these classifications without any explanation.
         """
@@ -46,7 +51,25 @@ class ChatPrompts:
     @staticmethod
     def intent_classification_examples():
         return [
+            {"role": "user", "content": "mcqs"},
+            {"role": "assistant", "content": "question_generation:multiple_choice"},
+            {"role": "user", "content": "mcq"},
+            {"role": "assistant", "content": "question_generation:multiple_choice"},
+            {"role": "user", "content": "Give me multiple choice questions"},
+            {"role": "assistant", "content": "question_generation:multiple_choice"},
             {"role": "user", "content": "Give me a quiz about Portuguese verbs"},
+            {"role": "assistant", "content": "question_generation:multiple_choice"},
+            {"role": "user", "content": "exercise"},
+            {"role": "assistant", "content": "question_generation:multiple_choice"},
+            {"role": "user", "content": "I want to exercise Portuguese grammar"},
+            {"role": "assistant", "content": "question_generation:multiple_choice"},
+            {"role": "user", "content": "practice Portuguese"},
+            {"role": "assistant", "content": "question_generation:multiple_choice"},
+            {"role": "user", "content": "test my Portuguese"},
+            {"role": "assistant", "content": "question_generation:multiple_choice"},
+            {"role": "user", "content": "give me exercises"},
+            {"role": "assistant", "content": "question_generation:multiple_choice"},
+            {"role": "user", "content": "I need to practice Portuguese"},
             {"role": "assistant", "content": "question_generation:multiple_choice"},
             {"role": "user", "content": "How do you say 'hello' in Portuguese?"},
             {"role": "assistant", "content": "general_chat"},
@@ -59,7 +82,7 @@ class ChatPrompts:
             {"role": "user", "content": "Test my knowledge of Portuguese grammar with fill in the blank questions"},
             {"role": "assistant", "content": "question_generation:fill_in_the_blanks"},
             {"role": "user", "content": "I want to practice Portuguese through a quiz"},
-            {"role": "assistant", "content": "question_generation:fill_in_the_blanks"},
+            {"role": "assistant", "content": "question_generation:multiple_choice"},
             {"role": "user", "content": "What's the weather like today?"},
             {"role": "assistant", "content": "off_topic"},
             {"role": "user", "content": "Yes"},
@@ -75,7 +98,15 @@ class ChatPrompts:
             {"role": "user", "content": "fill in the blank"},
             {"role": "assistant", "content": "question_generation:fill_in_the_blanks"},
             {"role": "user", "content": "Fill in the blank questions"},
-            {"role": "assistant", "content": "question_generation:fill_in_the_blanks"}
+            {"role": "assistant", "content": "question_generation:fill_in_the_blanks"},
+            {"role": "user", "content": "Correct my sentence"},
+            {"role": "assistant", "content": "question_generation:fill_in_the_blanks"},
+            {"role": "user", "content": "Teach me"},
+            {"role": "assistant", "content": "question_generation:fill_in_the_blanks"},
+            {"role": "user", "content": "Correct my sentence in Portuguese"},
+            {"role": "assistant", "content": "general_chat"},
+            {"role": "user", "content": "Teach me about Portuguese verbs"},
+            {"role": "assistant", "content": "general_chat"}
         ]
     
     @staticmethod
