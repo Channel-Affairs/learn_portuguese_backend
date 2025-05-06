@@ -170,10 +170,17 @@ async def fetch_prompt_from_cms(topic_ids: str):
         import json
 
         cms_base_url = os.getenv("CMS_BASE_URL", "http://localhost:3000/api")
+        
+        # Ensure cms_base_url doesn't end with a slash
+        if cms_base_url.endswith('/'):
+            cms_base_url = cms_base_url[:-1]
+            
+        complete_url = f"{cms_base_url}/get-prompt"
         print(f"Fetching prompt from CMS for topic_ids: {topic_ids}")
+        print(f"Complete CMS URL: {complete_url}")
         
         async with aiohttp.ClientSession() as session:
-            async with session.get(f"{cms_base_url}/get-prompt", params={"topicIds": topic_ids}) as response:
+            async with session.get(complete_url, params={"topicIds": topic_ids}) as response:
                 if response.status == 200:
                     data = await response.json()
                     print(f"CMS Response: {data}")
@@ -201,13 +208,26 @@ async def fetch_prompt_from_cms(topic_ids: str):
                         }
                 else:
                     error_text = await response.text()
-                    print(f"CMS API error: {error_text}")
+                    print(f"CMS API error (status {response.status}): {error_text}")
                     raise HTTPException(
                         status_code=response.status,
                         detail=f"Error from CMS API: {error_text}"
                     )
+    except aiohttp.ClientConnectorError as e:
+        print(f"Connection error to CMS API: {str(e)}")
+        print(f"Attempted URL: {cms_base_url}/get-prompt")
+        return {
+            'success': False,
+            'data': {
+                'name': 'Portuguese language',
+                'prompt': ''
+            }
+        }
     except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
         print(f"Error fetching prompt from CMS: {str(e)}")
+        print(f"Error details: {error_details}")
         return {
             'success': False,
             'data': {

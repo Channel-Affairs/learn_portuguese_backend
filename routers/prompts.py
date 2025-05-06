@@ -12,7 +12,7 @@ class ChatPrompts:
         IMPORTANT RULES: 
         1. Unless the user is asking about Portuguese content or vocabulary, respond in {preferred_language}.
         2. Portuguese words mentioned in examples or teachings should remain in Portuguese regardless of the response language.
-        3. Format all responses in HTML without doctype tag. Use these HTML tags:
+        3. YOU MUST format ALL responses in HTML without doctype tag. Use these HTML tags:
            - <div> for main content sections
            - <p> for paragraphs
            - <ul> and <li> for lists
@@ -22,7 +22,13 @@ class ChatPrompts:
            - <br> for line breaks
         4. Always wrap Portuguese words or phrases in <strong> tags.
         5. Use <ul> and <li> for lists of examples or explanations.
-        6. Keep the HTML clean and semantic."""
+        6. Keep the HTML clean and semantic.
+        7. Break explanations into clear paragraphs to enhance readability.
+        8. When introducing grammatical rules or vocabulary, always present examples as a list, ensuring clarity and ease of understanding.
+        9. Where appropriate, include brief dialogues between Portuguese speakers to demonstrate natural conversation.
+        10. Highlight key words, exceptions, or important concepts using bold or italics.
+        11. If relevant, provide concise summaries at the end of each section (without lists).
+        12. CRITICAL: EVERY response must be properly formatted in HTML with appropriate tags."""
     
     @staticmethod
     def intent_classification_prompt(topic_name):
@@ -38,10 +44,12 @@ class ChatPrompts:
         IMPORTANT RULES:
         1. When user mentions "exercise", "practice", "quiz", "test", "mcq", "mcqs", "multiple choice" in context of Portuguese learning, classify as question_generation:multiple_choice
         2. When user message EXACTLY matches "Correct my sentence" or "Teach me", classify as question_generation:fill_in_the_blanks
-        3. When user message contains additional context beyond "Correct my sentence" or "Teach me", classify as general_chat
-        4. Short responses like "yes", "no", "maybe", "I can't", etc. should be classified as "general_chat"
-        5. Any non-Portuguese learning topics should be "off_topic"
-        6. Messages in languages other than English or Portuguese should be "off_topic"
+        3. When user message contains phrases like "quiz me", "test me", "give me a quiz", "give me questions", or "quiz", classify as question_generation:multiple_choice
+        4. When user message contains phrases like "test me", "quiz me", "quiz", or "teach me ", "teach me with questions", classify as question_generation:multiple_choice
+        5. When user message contains additional context beyond "Correct my sentence" or "Teach me", check if it's still quiz-related before defaulting to general_chat
+        6. Short responses like "yes", "no", "maybe", "I can't", etc. should be classified as "general_chat"
+        7. Any non-Portuguese learning topics should be "off_topic"
+        8. Messages in languages other than English or Portuguese should be "off_topic"
         
         Current learning topic: {topic_name}
         
@@ -106,7 +114,21 @@ class ChatPrompts:
             {"role": "user", "content": "Correct my sentence in Portuguese"},
             {"role": "assistant", "content": "general_chat"},
             {"role": "user", "content": "Teach me about Portuguese verbs"},
-            {"role": "assistant", "content": "general_chat"}
+            {"role": "assistant", "content": "general_chat"},
+            {"role": "user", "content": "Quiz me"},
+            {"role": "assistant", "content": "question_generation:multiple_choice"},
+            {"role": "user", "content": "Quiz"},
+            {"role": "assistant", "content": "question_generation:multiple_choice"},
+            {"role": "user", "content": "Test me"},
+            {"role": "assistant", "content": "question_generation:multiple_choice"},
+            {"role": "user", "content": "test me on Portuguese"},
+            {"role": "assistant", "content": "question_generation:multiple_choice"},
+            {"role": "user", "content": "quiz me on verbs"},
+            {"role": "assistant", "content": "question_generation:multiple_choice"},
+            {"role": "user", "content": "quiz me on grammar"},
+            {"role": "assistant", "content": "question_generation:multiple_choice"},
+            {"role": "user", "content": "teach me with questions"},
+            {"role": "assistant", "content": "question_generation:multiple_choice"}
         ]
     
     @staticmethod
@@ -145,7 +167,7 @@ class ChatPrompts:
         IMPORTANT: 
         1. Respond in {preferred_language}.
         2. Be friendly but firm in redirecting to Portuguese language topics.
-        3. Format the response in HTML without doctype tag using these tags:
+        3. YOU MUST format ALL responses in HTML without doctype tag. Use these HTML tags:
            - <div> for main content sections
            - <p> for paragraphs
            - <ul> and <li> for lists
@@ -156,6 +178,7 @@ class ChatPrompts:
         4. Always wrap Portuguese words or phrases in <strong> tags.
         5. Use <ul> and <li> for lists of examples or explanations.
         6. Keep the HTML clean and semantic.
+        7. CRITICAL: EVERY response must begin with HTML tags and maintain proper HTML structure throughout.
         """
     
     @staticmethod
@@ -171,7 +194,7 @@ class ChatPrompts:
         1. Unless the user is asking for Portuguese content to be translated or explained, 
            respond in {preferred_language}.
         2. Keep any Portuguese words or phrases that you're teaching in Portuguese.
-        3. Format all responses in HTML without doctype tag using these tags:
+        3. YOU MUST format ALL responses in HTML without doctype tag. Use these HTML tags:
            - <div> for main content sections
            - <p> for paragraphs
            - <ul> and <li> for lists
@@ -182,8 +205,14 @@ class ChatPrompts:
         4. Always wrap Portuguese words or phrases in <strong> tags.
         5. Use <ul> and <li> for lists of examples or explanations.
         6. Keep the HTML clean and semantic.
-        7. Be helpful, accurate, and educational in your responses.
-        8. Remember to be helpful, accurate, and educational in your responses."""
+        7. Provide feedback in a structured and accessible format for language learners.
+        8. Break explanations into clear paragraphs to enhance readability.
+        9. When introducing grammatical rules or vocabulary, always present examples as a list, ensuring clarity and ease of understanding.
+        10. Where appropriate, include short dialogues between Portuguese speakers to demonstrate natural conversation.
+        11. Highlight key words, exceptions, or important concepts using bold or italics.
+        12. If relevant, provide concise summaries at the end of each section (without lists).
+        13. Ensure feedback is clear, engaging, and suited to learners of varying levels.
+        14. CRITICAL: EVERY response must begin with HTML formatting and maintain proper HTML structure throughout."""
     
     @staticmethod
     def question_generation_prompt(topic, cms_prompt=None, preferred_language="English"):
@@ -207,4 +236,23 @@ class ChatPrompts:
         - Make sure the answer tests knowledge of {topic}
         - Provide the correct word or phrase that should fill the blank
         - Include a hint that helps guide the learner
-        """
+        
+        CRITICAL HTML FORMATTING REQUIREMENTS:
+        YOU MUST format ALL responses in HTML without doctype tag. Use these HTML tags:
+        - <div> for main content sections
+        - <p> for paragraphs
+        - <ul> and <li> for lists
+        - <strong> or <b> for emphasis
+        - <em> or <i> for italics
+        - <span> for inline styling
+        - <br> for line breaks
+        
+        IMPORTANT FORMATTING GUIDELINES:
+        - Always wrap Portuguese words or phrases in <strong> tags
+        - Present all examples in list format using <ul> and <li> tags
+        - Break explanations into clear paragraphs for readability
+        - Use <strong> tags for key words and important concepts
+        - If including dialogues, format them clearly with speaker indicators
+        - Keep HTML clean and semantic
+        - EVERY response MUST begin with HTML formatting and maintain proper HTML structure throughout
+        """                                          
